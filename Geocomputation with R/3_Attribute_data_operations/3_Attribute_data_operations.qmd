@@ -1,0 +1,446 @@
+---
+title: "Geocomputation with R"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 2
+    self-contained: true
+    smooth-scroll: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 7
+    fig-asp: 0.6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../../style.css
+    minimal: false
+    link-external-newwindow: true
+    callout-appearance: simple
+    callout-icon: false
+    callout-border-left: "#22CC00"
+    abstract-title: "Abstract"
+    abstract: "Contained here are notes on [3 Attribute data operations](https://geocompr.robinlovelace.net/attr.html) from the book [Geocomputation with R](https://geocompr.robinlovelace.net/index.html) by Lovelace, Nowosad, Muenchow. We will stay close to the book's major sections with some modifications/additions in the R scripts based on this author's own preferences."
+---
+
+::: note
+-   Article setup:
+    -   Install \`quarto\` executable from \<https://quarto.org\>
+-   To compile article inside RStudio:
+    -   open file `3_Attribute_data_operations.qmd`
+    -   press \`Render\` from a recent version of RStudio
+-   For a table of contents, set the yaml line `toc:` to true and re-render.
+:::
+
+# Attribute data operations
+
+::: task
+Load the Required R Packages.
+:::
+
+```{r, message=FALSE, warning=FALSE}
+#| label: load-packages
+
+library(data.table, quietly = T)
+library(sf, quietly = T)
+library(terra, quietly = T)
+library(spData, quietly = T)
+library(magrittr, quietly = T)
+library(ggplot2, quietly = T)
+library(RplotterPkg, quietly = T)
+library(RspatialPkg, quietly = T)
+```
+
+## Introduction
+
+> Attribute data is non-spatial information associated with geographic (geometry) data.
+
+## Vector attribute manipulation
+
+> The geometry column of `sf` objects is typically called `geometry` or `geom` but any name can be used.
+
+::: task
+In the `spData::world` data.frame change the names of the `geom` and `name_long` columns to `g` and `n` respectively using base R data.frame techniques.
+:::
+
+Make a copy of `spData::world` and change the copies' column names:
+
+```{r}
+world_df <- cbind(spData::world)
+colnames(world_df)[which(names(world_df) == "geom")] <- "g"
+colnames(world_df)[which(names(world_df) == "name_long")] <- "n"
+colnames(world_df)
+```
+
+With the geometry renamed to "g", set the geometry column of `world_df` and show it and data.frame's class:
+
+```{r}
+sf::st_geometry(world_df) <- "g"
+class(world_df$g)
+class(world_df)
+```
+
+### Vector attribute subsetting
+
+::: task
+Select rows of `world_df` for countries with a small area.
+:::
+
+Perform the logical filter via `data.table` techniques:
+
+```{r}
+world_small_sf <- data.table::as.data.table(spData::world) %>% 
+  .[area_km2 < 40000,] %>% 
+  sf::st_as_sf(.)
+```
+
+```{r}
+#| code-fold: true
+#| fig.cap: Map of countries whose area is less than 40000 km2.
+
+world_small_plot <- RspatialPkg::get_geom_sf(
+    sf = world_small_sf,
+    sf_fill = "red",
+    hide_x_tics = T,
+    hide_y_tics = T
+  )
+world_small_plot
+```
+
+### Chaining commands with pipes
+
+::: task
+Use data.table chaining commands to filter, select columns and rows of `spData::world`.
+:::
+
+Create the simple feature:
+Get the first 5 asian countries.
+```{r}
+world_asia_sf <- data.table::as.data.table(spData::world) %>%
+  .[continent == "Asia"] %>%
+  .[1:5, .(name_long, continent, geom)] %>%
+  sf::st_as_sf(.)
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Subset an sf object of countries using data.table selection.
+
+world_asia_plot <- RspatialPkg::get_geom_sf(
+  sf = world_asia_sf,
+  aes_text = "name_long",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+world_asia_plot
+```
+
+### Vector attribute aggregation
+
+::: task
+Aggregate the `spData::world` sf object on the "continent" column to give population, area, and number of observations.
+:::
+Perform the chained aggregation:
+
+```{r}
+world_agg_chain_sf <- data.table::as.data.table(spData::world) %>%
+  .[, 
+    .(Pop = sum(pop, na.rm = TRUE), 
+      Area = sum(area_km2), 
+      N = .N, 
+      Density = round(sum(pop, na.rm = T)/sum(area_km2)), 
+      geometry = sf::st_union(geom)), by = continent] %>%
+  .[order(-N)] %>%
+  .[1:6,] %>%
+  sf::st_as_sf(.)
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Aggregation/grouping of a sf object using data.table techniques to compute a country's population density.
+
+world_agg_chain_plot <- RspatialPkg::get_geom_sf(
+    sf = world_agg_chain_sf,
+    aes_fill = "Density",
+    panel_color = "green",
+    hide_x_tics = T,
+    hide_y_tics = T,
+    legend_key_width = 0.7,
+    legend_key_height = 1.0
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = world_agg_chain_sf,
+    aes_text = "continent",
+    text_color = "red",
+    adding = T
+  ) +
+ggplot2::scale_fill_gradientn(
+  colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd"),
+  n.breaks = 8
+)  +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+world_agg_chain_plot
+```
+
+
+Display the resulting attributes of the sf object in a table:
+
+```{r}
+#| code-fold: true
+#| tbl-cap: Summary of country attributes from data.table grouping.
+
+RplotterPkg::create_table(
+  x = as.data.table(world_agg_chain_sf)[,1:5],
+  container_width_px = 300
+)
+```
+
+### Vector attribute joining
+
+::: task
+Using `data.table` techniques join data on coffee production (`spData::coffee_data`) with the `spData::world` dataset with the "name_long" column as the common variable.
+:::
+
+```{r}
+coffee_data_dt <- data.table::as.data.table(spData::coffee_data)
+world_coffee_sf <- data.table::as.data.table(spData::world) %>% 
+  coffee_data_dt[., on = c("name_long", "name_long")] %>% 
+  .[, .(name_long, coffee_production_2017, geom)] %>% 
+  sf::st_as_sf(.)
+world_coffee_sf
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Coffee production around the world.
+
+RspatialPkg::get_geom_sf(
+  sf = world_coffee_sf,
+  aes_fill = "coffee_production_2017",
+  subtitle = "Coffee Production for 2017",
+  center_titles = T,
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+ggplot2::scale_fill_gradientn(
+  colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd"),
+  n.breaks = 8
+)  +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+### Creating attributes and removing spatial information
+
+::: task
+Join the character columns "continent" and "region_un" into one character column called "con_reg" from `spData::world`.
+:::
+
+```{r}
+world_join_sf <- data.table::as.data.table(spData::world) %>% 
+  .[, `:=`(con_reg = paste(continent, region_un, sep = ":"), continent = NULL, region_un = NULL)] %>% 
+  sf::st_as_sf(.)
+head(world_join_sf)
+```
+
+::: task
+Split the character column of `world_join_sf$con_reg` back into separate columns of "continent" and "region_un".
+:::
+
+```{r}
+world_split_sf <- as.data.table(world_join_sf) %>% 
+  .[, c("continent", "region_un") := tstrsplit(con_reg, ":")] %>% 
+  sf::st_as_sf(.)
+head(world_split_sf)
+```
+
+::: task
+Rename the "name_long" column of `spData::world` to "name".
+:::
+
+```{r}
+world_rename_sf <- data.table::as.data.table(spData::world) %>% 
+  data.table::setnames(., old = "name_long", new = "name") %>% 
+  sf::st_as_sf(.)
+colnames(world_rename_sf)
+```
+
+## Manipulating raster objects
+
+::: task
+Create from scratch a simple SpatRaster object with 6 rows and columns using `terra::rast()`.
+:::
+
+Create the dataset using `terra::rast()`:
+
+```{r}
+elev_scratch_sr <- terra::rast(
+  nrows = 6,
+  ncols = 6,
+  resolution = 0.5,
+  xmin = -1.5,
+  xmax = 1.5,
+  ymin = -1.5,
+  ymax = 1.5,
+  vals = 1:36,
+  names = "scratch"
+)
+elev_scratch_sr
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Mapping of a scratch `SpatRaster` created from `terra::rast()`.
+
+terra::plot(elev_scratch_sr)
+```
+
+3.  Display the SpatRaster object using `RspatialPkg::get_geom_raster()`.
+
+```{r}
+#| code-fold: true
+#| fig.cap: Map a scratch SpatRaster object using` RspatialPkg::get_geom_raster()`. 
+
+elev_scratch_df <- as.data.frame(elev_scratch_sr, xy = TRUE)
+RspatialPkg::get_geom_raster(
+  df = elev_scratch_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "scratch",
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+ggplot2::scale_fill_gradientn(
+  colors = rev(grDevices::terrain.colors(50)),
+  n.breaks = 8
+) +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+::: task
+Create the same SpatRaster object from a dataframe.
+:::
+
+Create the data.frame:
+
+```{r}
+x <- seq(-1.25, 1.25, length.out = 6)
+y <- seq(-1.25, 1.25, length.out = 6)
+elev_scratch_df <- expand.grid(x = x, y = y)
+elev_scratch_df$z <- 1:36
+```
+
+Convert the data.frame to a SpatRaster object:
+
+```{r}
+elev_scratch_df_sr <- terra::rast(elev_scratch_df)
+terra::crs(elev_scratch_df_sr) <- "EPSG:4326"
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Mapping of a scratch `SpatRaster` created from a  data.frame.
+
+elev_scratch_df_df <- as.data.frame(elev_scratch_df_sr, xy = TRUE)
+RspatialPkg::get_geom_raster(
+  df = elev_scratch_df_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "z",
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+ggplot2::scale_fill_gradientn(
+  colors = rev(grDevices::terrain.colors(50)),
+  n.breaks = 8
+) +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+::: task
+Create a raster object from a factor variable.
+:::
+
+Create the factor variable:
+
+```{r}
+grain_order_v <- c("clay","silt","sand")
+grain_values_v <- sample(grain_order_v, 36, replace = TRUE)
+grain_factor <- factor(grain_values_v, levels = grain_order_v)
+```
+
+Create a raster object from the factor:
+
+```{r}
+grain_sr <- terra::rast(
+  nrow = 6,
+  ncols = 6,
+  resolution = 0.5,
+  xmin = -1.5,
+  xmax = 1.5,
+  ymin = -1.5,
+  ymax = 1.5,
+  vals = grain_factor
+)
+grain_sr
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Map of a scratch `SpatRaster` object that is defined from a factor/categorial variable.
+
+terra::plot(grain_sr)
+```
+
+### Raster subsetting
+
+::: task
+Retrieve the top left pixel in the terra raster object `elev_scratch_sr`.
+:::
+
+```{r}
+cell_1_1_df <- elev_scratch_sr[1,1]
+cell_1_1_df$scratch
+```
+
+::: task
+Retrieve the values of all the cells of `grain_sr`.
+:::
+
+```{r}
+grain_values_mat <- grain_sr[]
+grain_values_mat[,1]
+```
+
+### Summarizing raster objects
+
+::: task
+Create a frequency table of `grain_sr` by calling `terra::freq()` function.
+:::
+
+```{r}
+terra::freq(grain_sr)
+```
+
+### Conclusion
+This concludes the notes on Chapter 3 "Attribute data operations".

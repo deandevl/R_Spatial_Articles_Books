@@ -1,0 +1,223 @@
+---
+title: "Geocomputation with R"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 4
+    self-contained: true
+    smooth-scroll: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 7
+    fig-asp: 0.6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../../style.css
+    minimal: false
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "Contained here are notes on [5 Geometry operations](https://geocompr.robinlovelace.net/spatial-operations.html) from the book [Geocomputation with R](https://geocompr.robinlovelace.net/index.html) by Lovelace, Nowosad, Muenchow. We will stay close to the book's major sections with some modifications/additions in the R scripts based on this author's own preferences."
+---
+
+::: note
+-   Article setup:
+    -   Install \`quarto\` executable from \<https://quarto.org\>
+-   To compile article inside RStudio:
+    -   open file `Geometry_operations.qmd`
+    -   press \`Render\` from a recent version of RStudio
+-   For a table of contents, set the yaml line `toc:` to true and re-render.
+:::
+
+# Geometry operations
+
+::: task
+Load the Required R Packages.
+:::
+
+```{r, message=FALSE, warning=FALSE}
+#| label: load-packages
+
+library(data.table, quietly = T)
+library(purrr)
+library(ggplot2, quietly = T)
+library(here, quietly = T)
+library(gt, quietly = T)
+library(magrittr, quietly = T)
+library(sf, quietly = T)
+library(terra, quietly = T)
+library(smoothr, quietly = T)
+library(spData, quietly = T)
+library(spDataLarge, quietly = T)
+library(RplotterPkg, quietly = T)
+library(RspatialPkg, quietly = T)
+```
+
+## Introduction
+
+> This chapter focuses on manipulating the geographic elements of geographic objects, for example by simplifying and converting vector geometries, cropping raster datasets, and converting vector objects into rasters and from rasters into vectors. After reading it — and attempting the exercises at the end — you should understand and have control over the geometry column in sf objects and the extent and geographic location of pixels represented in rasters in relation to other geographic objects.
+
+## Geometric operations on vector data
+
+> ...the functions discussed in this section work on objects of class sfc in addition to objects of class sf.
+
+### Simplification
+
+::: task
+Simplify the LINESTRING geometries representing the river Seine and tributaries.
+:::
+
+Simplify:
+```{r}
+seine_simp_sf <- sf::st_simplify(spData::seine, dTolerance = 2000) # 2000 m
+```
+
+Map:
+```{r}
+#| code-fold: true 
+#| fig-width: 6
+#| fig-height: 5
+#| fig-cap: |
+#|   Figure 5.1: Comparison of the original and simplified geometry of the seine object.
+
+seine_plot <- RspatialPkg::get_geom_sf(
+  sf = spData::seine, 
+  subtitle = "Original Geometry",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+
+seine_simp_plot <- RspatialPkg::get_geom_sf(
+  sf = seine_simp_sf, 
+  subtitle = "Simplified Geometry",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+
+layout <- list(
+  plots = list(original = seine_plot, simplified = seine_simp_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+
+multi_panel_grid(
+  layout = layout,
+  col_widths = c(9, 9),
+  row_heights = 8
+)
+```
+
+Memory usage:
+```{r}
+object.size(spData::seine)
+object.size(seine_simp_sf)
+```
+
+::: task
+Simplify a sf of polygon geometries such as `spData::us_states`.
+:::
+
+> ...the first step is to project the data into some adequate projected CRS, such as US National Atlas Equal Area (epsg = 2163).
+
+```{r}
+us_states2163_sf <- sf::st_transform(spData::us_states, "EPSG:2163")
+us_states_simp1_sf <- sf::st_simplify(us_states2163_sf, dTolerance = 100000) # 100 km
+```
+
+```{r}
+#| code-fold: true 
+#| fig-width: 6
+#| fig-height: 5 
+#| fig-cap: |
+#|   Figure 5.2-1: Polygon simplification in action, comparing original with `sf::st_simplify()` version of the contiguous US.
+
+us_states_orig_plot <- RspatialPkg::get_geom_sf(
+  sf = us_states2163_sf, 
+  subtitle = "Original data",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+us_states_simp1_plot <- RspatialPkg::get_geom_sf(
+  sf = us_states_simp1_sf, 
+  subtitle = "st_simplify",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+layout <- list(
+  plots = list(us_states_orig_plot, us_states_simp1_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+
+multi_panel_grid(
+  layout = layout,
+  col_widths = c(9, 9),
+  row_heights = 8
+)
+```
+> A limitation with st_simplify() is that it simplifies objects on a per-geometry basis. This means the ‘topology’ is lost, resulting in overlapping and ‘holey’ areal units 
+
+Compare with smoothed version `smoothr::smooth()`:
+```{r}
+us_states_smooth_sf <- smoothr::smooth(us_states2163_sf, method = "ksmooth", smoothness = 6)
+```
+
+```{r}
+#| code-fold: true 
+#| fig-cap: |
+#|   Figure 5.2-2: Smooth version of the contiguous US. 
+RspatialPkg::get_geom_sf(
+  sf = us_states_smooth_sf, 
+  subtitle = "smoothr::smooth(method='ksmooth')",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+```
+
+### Centroids
+
+::: task
+Calculate and map both the centroids and *point on surface* locations of New Zealand regions.
+:::
+
+```{r, warning=FALSE}
+nz_centroid_sf <- sf::st_centroid(spData::nz)
+nz_pos_sf <- sf::st_point_on_surface(spData::nz)
+```
+
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 5.3: Centroids and Point On Surface for regions in New Zealand
+
+RspatialPkg::get_geom_sf(
+  sf = spData::nz,
+  subtitle = "Centroids and Point On Surface in New Zealand regions",
+  center_titles = T,
+  sf_fill = "white",
+  show_legend = F,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_centroid_sf,
+  sf_color = "red",
+  sf_size = 3,
+  sf_fill = "white",
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_pos_sf,
+  sf_color = "blue",
+  sf_size = 3,
+  sf_fill = "white",
+  adding = T
+)  
+```
+

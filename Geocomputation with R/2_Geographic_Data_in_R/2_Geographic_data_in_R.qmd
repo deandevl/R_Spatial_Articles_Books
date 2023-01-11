@@ -1,0 +1,685 @@
+---
+title: "Geocomputation with R"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 1
+    self-contained: true
+    smooth-scroll: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 7
+    fig-asp: 0.6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../../style.css
+    minimal: false
+    link-external-newwindow: true
+    callout-appearance: simple
+    callout-icon: false
+    callout-border-left: "#22CC00"
+    abstract-title: "Abstract"
+    abstract: "Contained here are notes on [Chapter 2 Geographic Data in R](https://geocompr.robinlovelace.net/spatial-class.html) from the book [Geocomputation with R](https://geocompr.robinlovelace.net/index.html) by Lovelace, Nowosad, Muenchow. We will stay close to the book's major sections with some modifications/additions in the R scripts based on this author's own preferences."
+---
+
+::: note
+-   Article setup:
+    -   Install \`quarto\` executable from \<https://quarto.org\>
+-   To compile article inside RStudio:
+    -   open file `2_Geographic_data_in_R.qmd`
+    -   press \`Render\` from a recent version of RStudio
+-   For a table of contents, set the yaml line `toc:` to true and re-render.
+:::
+
+# Geographic data in R
+
+::: task
+Load the Required R Packages.
+:::
+
+```{r, warning=FALSE, message=FALSE}
+#| label: load-packages
+
+library(here, quietly = T)
+library(sf,quietly = T)
+library(sfheaders,quietly = T)
+library(terra,quietly = T)
+library(spData,quietly = T)
+library(ggplot2,quietly = T)
+library(data.table,quietly = T)
+library(RColorBrewer)
+library(RspatialPkg)
+```
+
+## Introduction
+
+> The vector data model represents the world using points, lines and polygons. These have discrete, well-defined borders, meaning that vector datasets usually have a high level of precision (but not necessarily accuracy as we will see in Section 2.5). The raster data model divides the surface up into cells of constant size. Raster datasets are the basis of background images used in web-mapping and have been a vital source of geographic data since the origins of aerial photography and satellite-based remote sensing devices. Rasters aggregate spatially specific features to a given resolution, meaning that they are consistent over space and scalable (many worldwide raster datasets are available).
+
+## Vector data
+
+> sf provides classes for geographic vector data and a consistent command-line interface to important low level libraries for geocomputation:
+
+-   [GDAL](https://gdal.org/), for reading, writing and manipulating a wide range of geographic data formats, covered in Chapter 8
+-   [PROJ](https://proj.org/), a powerful library for coordinate system transformations, which underlies the content covered in Chapter 7
+-   [GEOS](https://libgeos.org/), a planar geometry engine for operations such as calculating buffers and centroids on data with a projected CRS, covered in Chapter 5
+-   [S2](https://s2geometry.io/), a spherical geometry engine written in C++ developed by Google, via the s2 package, covered in Section 2.2.9 below and in Chapter 7
+
+::: note
+s2 functionality is used by default on geometries with geographic (longitude/latitude) coordinate systems. See [this](https://r-spatial.org/r/2020/06/17/s2.html) for further information.
+:::
+
+### An introduction to simple features
+
+> sf can represent all common vector geometry types (raster data classes are not supported by sf): points, lines, polygons and their respective 'multi' versions (which group together features of the same type into a single feature). sf also supports geometry collections, which can contain multiple geometry types in a single object.
+
+> sf's functionality is well documented on its website at [r-spatial.github.io/sf/](https://r-spatial.github.io/sf/index.html) which contains 7 vignettes.
+
+::: task
+Use the `world` dataset provided by **spData** to show what `sf` objects are and how they work.
+:::
+
+The class of `spData::world`:
+
+```{r}
+class(spData::world)
+```
+
+The colnames of `spData::world`:
+
+```{r}
+names(spData::world)
+```
+
+> The contents of this `geom` column give sf objects their spatial powers: `world$geom` is a 'list column' that contains all the coordinates of the country polygons.
+
+::: task
+Map the `world` sf object using function`terra::plot()`.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.3: Plot of `spData::world` sf object using **terra::plot()**
+
+terra::plot(spData::world)
+```
+
+::: task
+Since sf is a data.frame, apply the base `summary()` function to `spData::world`.
+:::
+
+```{r}
+#| code-fold: true
+
+summary(spData::world$lifeExp)
+```
+
+> These spatial columns are often called geom or geometry: world\$geom refers to the spatial element of the world object described above. These geometry columns are 'list columns' of class sfc (see Section 2.2.7). In turn, sfc objects are composed of one or more objects of class sfg: simple feature geometries that we describe in Section 2.2.6.
+
+::: task
+Show the class of the `spData::world$geom` column (sfc -- simple feature column).
+:::
+
+```{r}
+class(spData::world$geom)
+```
+
+::: task
+Show the class of a item contained in the `spData::world$geom` column (sfg -- simple feature geometries.
+:::
+
+```{r}
+class(spData::world$geom[[1]])
+```
+
+::: task
+Convert the `world` sf object to a **data.table** data.frame and show its class.
+:::
+
+```{r}
+world_dt <- data.table::as.data.table(spData::world)
+class(world_dt)
+```
+
+::: task
+Convert `world_dt` back to an sf object using the `sf::st_as_sf()` function.
+:::
+
+```{r}
+world_sf <- sf::st_as_sf(world_dt)
+world_sf
+```
+
+### Why simple features?
+
+-   Fast reading and writing of data
+-   Enhanced plotting performance
+-   sf objects can be treated as data frames including conversion to `data.table` for manipulation
+-   sf functions can be combined with the `|>` or `%>%` pipe operator
+
+### Basic map making
+
+::: task
+Subset and map the `world` sf object.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: Figure 2.4-1 |
+#|   Mapped subset of spData::world using `terra::plot().
+
+world_subset_sf <- spData::world[3:6]
+terra::plot(world_subset_sf)
+```
+
+::: task
+Map a single variable from `spData::world`.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.4-2: Map a single feature ("pop") using `RspatialPkg::get_geom_sf()`.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::world,
+  aes_fill = "pop",
+  title = "World Population",
+  center_titles = T,
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+ggplot2::scale_fill_gradientn(
+  colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd"),
+  n.breaks = 8
+) +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+::: task
+Map the continent of Asia over the map of the world.
+:::
+
+Create a simple feature from `spData::world` where continent equals "Asia":
+
+```{r}
+world_asia_sf <- spData::world[spData::world$continent == "Asia", ]
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.5: Map the continent of Asia over the map of the world.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::world,
+  aes_fill = "pop",
+  title = "Plot of world populations with Asia in red",
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+RspatialPkg::get_geom_sf(
+  sf = world_asia_sf,
+  adding = T,
+  sf_fill = "red"
+)  +
+ggplot2::scale_fill_gradientn(
+  colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd"),
+  n.breaks = 8
+) +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+::: task
+Create a map of continents with overlaid circles whose diameters represent country populations from `spData::world` sf object.
+:::
+
+Scale the raw population numbers:
+
+```{r}
+cex <- sqrt(spData::world$pop) / 10000
+```
+
+Compute the centroid geom points for each country. Return the centroid of the largest (sub) polygon of a MULTIPOLYGON:
+
+```{r, message=FALSE, warning=FALSE}
+world_proj_sf <- sf::st_transform(spData::world, crs = "+proj=eck4")
+world_centroids_sf <- sf::st_centroid(world_proj_sf, of_largest_polygon = TRUE)
+
+```
+
+Combine the centroid data with scaled pop numbers:
+
+```{r}
+world_centroids_sf <- cbind(world_centroids_sf, cex)
+```
+
+Map the world overlaid with the centroid points as circles whose size reflect the country's scaled pop numbers:
+
+```{r, message=FALSE, warning=FALSE}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.6: Map world overlaid with centroid points whose size reflect a country's population.
+
+RspatialPkg::get_geom_sf( # show world with "continent" as fill aesthetic
+  sf = spData::world,
+  aes_fill = "continent",
+  subtitle = "Overlaid circles representing country populations",
+  center_titles = T,
+  legend_key_width = 0.7,
+  legend_key_height = 0.5,
+  na_rm = T
+) +
+RspatialPkg::get_geom_sf( # add the circles at centroid locations
+  sf = world_centroids_sf,
+  aes_size = "cex",
+  sf_shape = 21,
+  sf_fill = "darkred",
+  adding = T
+)
+```
+
+::: task
+Create a map of India with thick border and gray fill for emphasis among Asian countries.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.7: Map India with thick borders and gray fill.
+
+india_sf <- spData::world[spData::world$name_long == "India",]
+
+RspatialPkg::get_geom_sf(
+  sf = world_asia_sf,
+  sf_fill = "white",
+  subtitle = "India emphasis among Asian countries",
+  center_titles = T,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  legend_key_width = 0.7,
+  legend_key_height = 0.4
+) +
+RspatialPkg::get_geom_sf(
+  sf = india_sf,
+  sf_fill = "gray",
+  sf_linewidth = 2,
+  adding = T
+)
+```
+
+### Geometry types
+
+> Geometries are the basic building blocks of simple features. Simple features in R can take on one of the 18 geometry types supported by the sf package. In this chapter we will focus on the seven most commonly used types: POINT, LINESTRING, POLYGON, MULTIPOINT, MULTILINESTRING, MULTIPOLYGON and GEOMETRYCOLLECTION.
+
+### The sf class
+
+::: task
+Given non-geographic attributes of "name", "temperature", and "date" create an sf object.
+:::
+
+Create an `sfg` object (simple feature geometry) given long/lat coordinates:
+
+```{r}
+london_pt_sfg <- sf::st_point(c(0.1, 51.5)) 
+class(london_pt_sfg)
+```
+
+Create an `sfc` object (simple feature geometry column) from above `sfg` object. Also set the CRS. A `sfc` is a list of `sfg`'s.
+
+```{r}
+london_geom_sfc <- sf::st_sfc(london_pt_sfg, crs = 4326)
+london_geom_sfc
+is.list(london_geom_sfc)
+length(london_geom_sfc)
+```
+
+You can verify the CRS of a sfc with `sf::st_crs()`:
+
+```{r}
+sf::st_crs(london_geom_sfc)
+```
+
+
+Create a `data.frame` that includes the non-geographic attributes:
+
+```{r}
+london_attrib_df <- data.frame(
+  name = "London",
+  temperature = 25,
+  date = as.Date("2017-06-21")
+)
+```
+
+Create the sf object that combines the geographic/non-geographic info:
+
+```{r}
+london_temp_sf <- sf::st_sf(london_attrib_df, geometry = london_geom_sfc)
+london_temp_sf
+```
+
+### Simple feature geometries (sfg)
+
+> The sfg class represents the different simple feature geometry types in R: point, linestring, polygon (and their 'multi' equivalents, such as multipoints) or geometry collection.
+
+### Simple feature columns (sfc)
+
+> One sfg object contains only a single simple feature geometry. A simple feature geometry column (sfc) is a **list** of sfg objects, which is additionally able to contain information about the coordinate reference system in use.
+
+::: task
+Combine two sfg geometries into one sfc list of geometries.
+:::
+
+Define two sfg geometries:
+
+```{r}
+point1_sfg <- sf::st_point(c(5,2))
+point2_sfg <- sf::st_point(c(1,3))
+```
+
+Combine the two simple geometries into one sfc object (a list of sfg's):
+Note that we can set the CRS for the geometries.
+```{r}
+points_sfc <- sf::st_sfc(point1_sfg, point2_sfg, crs = "EPSG:4326")
+points_sfc
+is.list(points_sfc)
+length(points_sfc)
+points_sfc[[2]]
+```
+
+### The sfheaders package
+
+> sfheaders is an R package that speeds-up the construction, conversion and manipulation of sf objects (Cooley 2020). It focuses on building sf objects from vectors, matrices and data frames, rapidly, and without depending on the sf library; and exposing its underlying C++ code through header files (hence the name, sfheaders).
+
+::: task
+Create a single sfg point object from a coordinate/vector pair using **sfheaders** package.
+:::
+
+```{r}
+v <- c(1,1)
+v_sfg <- sfheaders::sfg_point(obj = v)
+v_sfg
+```
+
+::: task
+Create sfg LINESTRING geometry objects from matrices and data frames.
+:::
+
+From matrices:
+
+```{r}
+m <- matrix(1:8, ncol=2)
+m_sfg <- sfheaders::sfg_linestring(obj = m)
+m_sfg
+```
+
+A sfg POLYGON geometry object from a data frame:
+
+```{r}
+dt <- data.table(
+  x = 1:4,
+  y = 4:1
+)
+dt_sfg <- sfheaders::sfg_polygon(obj = dt)
+dt_sfg
+```
+
+::: task
+Create a **sf** object and set its CRS from the above data.table `dt`.
+:::
+
+```{r}
+dt_sf <- sfheaders::sf_polygon(obj = dt)
+sf::st_crs(dt_sf) <- "EPSG:4326"
+dt_sf
+```
+
+### Spherical geometry operations with S2
+
+> Spherical geometry engines are based on the fact that world is round while simple mathematical procedures for geocomputation, such as calculating a straight line between two points or the area enclosed by a polygon, assume planar (projected) geometries.
+
+> Since sf version 1.0.0, R supports spherical geometry operations 'out of the box', thanks to its interface to Google's S2 spherical geometry engine via the s2 interface package. S2 is perhaps best known as an example of a Discrete Global Grid System (DGGS).
+
+> sf can run in two modes with respect to S2: on and off. By default the S2 geometry engine is turned on
+
+::: task
+Compare maps with S2 on and off for an India map.
+:::
+
+Create an India sf object:
+
+```{r}
+india_sf <- spData::world[spData::world$name_long == "India",]
+```
+
+With S2 on:
+
+```{r}
+#| code-fold: true
+#| fig-cap:  |
+#|   Figure 2.12-1: Map of India with S2 on.
+
+sf::sf_use_s2(TRUE)
+india_buffer_with_S2_sf <- sf::st_buffer(india_sf, 1)
+RspatialPkg::get_geom_sf(
+  sf = india_buffer_with_S2_sf,
+  subtitle = "Map of India with S2 on",
+  center_titles = T
+)
+```
+
+3.  With S2 off:
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.12-2 Map of India with S2 off.
+
+sf::sf_use_s2(FALSE) # turn s2 off
+india_buffer_without_S2_sf <- sf::st_buffer(india_sf, 1)
+RspatialPkg::get_geom_sf(
+  sf = india_buffer_without_S2_sf,
+  subtitle = "Map of India with S2 off",
+  center_titles = T
+)  
+sf::sf_use_s2(TRUE) # turn s2 back on
+```
+
+## Raster data
+
+> The spatial raster data model represents the world with the continuous grid of cells (often also called pixels).
+
+> The raster data model usually consists of a raster header and a matrix (with rows and columns) representing equally spaced cells (often also called pixels).
+
+> Raster maps usually represent continuous phenomena such as elevation, temperature, population density or spectral data. Discrete features such as soil or land-cover classes can also be represented in the raster data model.
+
+### R packages for working with raster data
+
+> **terra** focuses on the most common raster data model (regular grids), while **stars** also allows storing less popular models (including regular, rotated, sheared, rectilinear, and curvilinear grids). While **terra** usually handle one or multi-layered rasters16, the **stars** package provides ways to store raster data cubes -- a raster object with many layers (e.g., bands), for many moments in time (e.g., months), and many attributes (e.g., sensor type A and sensor type B)
+
+> **terra** is based on C++ code and mostly uses C++ pointers. **stars** stores values as lists of arrays for smaller rasters or just a file path for larger ones
+
+> The origin (or starting point) is frequently the coordinate of the lower-left corner of the matrix (the terra package, however, uses the upper left corner, by default.
+
+### An introduction to **terra**
+
+::: task
+Create a `SpatRaster` object using **terra** package.
+:::
+
+Create the `SpatRaster` raster object that covers elevations (attribute = "srtm") of the Zion National Park (Utah, USA) from the "spDataLarge" package:
+
+```{r}
+zion_raster_filepath <- file.path(here(), "data", "srtm.tif")
+zion_rast_sr <- terra::rast(zion_raster_filepath)
+zion_rast_sr
+```
+
+### Basic map making
+
+::: task
+Use `terra::plot()` to visualize the above `SpatRaster` object.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: |
+#|   Figure 2.15: Map of `SpatRaster` object of elevations in Zion National Park.
+
+terra::plot(zion_rast_sr)
+```
+
+::: task
+Use `RspatialPkg:get_geom_raster()` to create a `ggplot2::` based raster mapping.
+:::
+Note: The `SpatRaster` object must be converted to a data.frame.
+```{r}
+#| code-fold: true
+#| fig-cap: Map `SpatRaster` object using `RspatialPkg:get_geom_raster()`.
+
+zion_rast_df <- as.data.frame(zion_rast_sr, xy = T)
+RspatialPkg::get_geom_raster(
+  df = zion_rast_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "srtm",
+  subtitle = "Zion National Park Elevations",
+  center_titles = T,
+  x_title = "Longitude (degrees West)",
+  y_title = "Latitude (degrees North)",
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+ggplot2::scale_fill_gradientn(
+  colors = grDevices::terrain.colors(50),
+  n.breaks = 8
+) +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+### Raster classes
+
+::: task
+Create a `terra::SpatRaster` object from scratch.
+:::
+
+```{r}
+new_rast_terra <- terra::rast(
+  nrows = 6,
+  ncols = 6,
+  resolution = 0.5,
+  xmin = -1.5,
+  xmax = 1.5,
+  ymin = -1.5,
+  ymax = 1.5,
+  vals = 1:36
+)
+new_rast_terra
+```
+
+::: task
+Read a multilayered raster file using `terra::rest()` and select a layer.
+:::
+
+Read "raster/landsat.tif" from `spDataLarge`:
+
+```{r}
+multi_raster_filepath <- file.path(here(), "data", "landsat.tif")
+multi_rast_sr <- terra::rast(multi_raster_filepath)
+multi_rast_sr
+```
+
+Select layer "landsat_4":
+
+```{r}
+multi_rast_4_sr <- terra::subset(multi_rast_sr, "landsat_4")
+multi_rast_4_sr
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Map of a single raster layer from a multilayered landsat.tif file.
+
+multi_rast_4_df <- as.data.frame(multi_rast_4_sr, xy = T)
+RspatialPkg::get_geom_raster(
+  df = multi_rast_4_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "landsat_4",
+  subtitle = "landsat_4",
+  legend_key_width = 0.7,
+  legend_key_height = 1.0,
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+```
+
+## Geographic and projected Coordinate Reference Systems (CRS)
+
+> ...(CRS) defines how the spatial elements of the data relate to the surface of the Earth (or other bodies).
+
+> CRSs are either geographic or projected
+
+> CRSs of sf objects can be queried with the function `sf::st_crs()`, CRSs of terra objects can be queried with the function `terra::crs()`.
+
+### Geographic coordinate systems
+
+> Geographic coordinate systems identify any location on the Earth's surface using two values --- longitude and latitude
+
+> Spherical models assume that the Earth is a perfect sphere of a given radius -- they have the advantage of simplicity but, at the same time, they are inaccurate: the Earth is not a sphere! Ellipsoidal models are defined by two parameters: the equatorial radius and the polar radius. These are suitable because the Earth is compressed: the equatorial radius is around 11.5 km longer than the polar radius
+
+> Ellipsoids are part of a wider component of CRSs: the datum. This contains information on what ellipsoid to use and the precise relationship between the Cartesian coordinates and location on the Earth's surface. There are two types of datum --- geocentric (such as WGS84) and local (such as NAD83)
+
+### Projected coordinate reference systems
+
+> All projected CRSs are based on a geographic CRS, described in the previous section, and rely on map projections to convert the three-dimensional surface of the Earth into Easting and Northing (x and y) values in a projected CRS. Projected CRSs are based on Cartesian coordinates on an implicitly flat surface. They have an origin, x and y axes, and a linear unit of measurement such as meters.
+
+> ...some properties of the Earth's surface are distorted in this process, such as area, direction, distance, and shape. A projected coordinate system can preserve only one or two of those properties. Projections are often named based on a property they preserve: equal-area preserves area, azimuthal preserve direction, equidistant preserve distance, and conformal preserve local shape.
+
+> There are three main groups of projection types - conic, cylindrical, and planar (azimuthal).
+
+> A quick summary of different projections, their types, properties, and suitability can be found in “Map Projections” (1993) and [here](https://www.geo-projections.com/). 
+
+> Knowing which CRS your data is in, and whether it is in geographic (lon/lat) or projected (typically meters), is important and has consequences for how R handles spatial and geometry operations
+
+## Units
+
+> A novel feature of geometry data in sf objects is that they have native support for units. This means that distance, area and other geometric calculations in sf return values that come with a units attribute, defined by the `units` package.
+
+::: task
+Create a sf object of Luxembourg and calculate its area using `sf::st_area()` function.
+:::
+
+```{r}
+luxembourg_sf <- spData::world[spData::world$name_long == "Luxembourg",]
+sf::st_area(luxembourg_sf)
+```
+
+::: task
+Convert the Luxembourg area from square meters to square kilometers using `units::set_units()` function.
+:::
+
+```{r}
+units::set_units(sf::st_area(luxembourg_sf), km^2)
+```
+
+## Conclusion
+This concludes the notes on Chapter 2 "Geographic data in R".

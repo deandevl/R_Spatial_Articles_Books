@@ -1,0 +1,1164 @@
+---
+title: "Geocomputation with R"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 3
+    self-contained: true
+    smooth-scroll: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 7
+    fig-asp: 0.6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../../style.css
+    minimal: false
+    link-external-newwindow: true
+    callout-appearance: simple
+    callout-icon: false
+    callout-border-left: "#22CC00"
+    abstract-title: "Abstract"
+    abstract: "Contained here are notes on [4 Spatial data operations](https://geocompr.robinlovelace.net/spatial-operations.html) from the book [Geocomputation with R](https://geocompr.robinlovelace.net/index.html) by Lovelace, Nowosad, Muenchow. We will stay close to the book's major sections with some modifications/additions in the R scripts based on this author's own preferences."
+---
+
+::: note
+-   Article setup:
+    -   Install \`quarto\` executable from \<https://quarto.org\>
+-   To compile article inside RStudio:
+    -   open file `4_Spatial_data_operations.qmd`
+    -   press \`Render\` from a recent version of RStudio
+-   For a table of contents, set the yaml line `toc:` to true and re-render.
+:::
+
+# Spatial data operations
+
+::: task
+Load the required R packages.
+:::
+
+```{r, message=FALSE, warning=FALSE}
+#| label: load-packages
+
+library(here, quietly = T)
+library(RColorBrewer, quietly = T)
+library(data.table, quietly = T)
+library(sf, quietly = T)
+library(terra, quietly = T)
+library(geodata, quietly = T)
+library(spData, quietly = T)
+library(magrittr, quietly = T)
+library(ggplot2, quietly = T)
+library(RspatialPkg, quietly = T)
+```
+
+## Introduction
+
+> It is important to note that spatial operations that use two spatial objects rely on both objects having the same coordinate reference system.
+
+## Spatial operations on vector data
+
+> This section provides an overview of spatial operations on vector geographic data represented as simple features in the **sf** package.
+
+### Spatial subsetting
+
+> Spatial subsetting is the process of taking a spatial object and returning a new object containing only features that relate in space to another object.
+
+> subsets of sf data frames can be created with square bracket (\[) operator using the syntax x\[y, , op = st_intersects\], where x is an sf object from which a subset of rows will be returned, y is the 'subsetting object' and , op = st_intersects is an optional argument that specifies the topological relation (also known as the binary predicate) used to do the subsetting. The default topological relation used when an op argument is not provided is st_intersects(): the command x\[y, \] is identical to x\[y, , op = st_intersects\]
+
+> The default setting st_intersects is a ‘catch all’ topological relation that will return features in the target that *touch*, *cross* or are *within* the source ‘subsetting’ object.
+
+> ...for spatial subsetting both x and y must be geographic objects. Specifically, objects used for spatial subsetting in this way must have the class sf or sfc.
+
+>  ...and the result of the operation returns another sf object representing the features in the target...
+
+::: task
+Create and show the sf object for just the Canterbury geometries using data.table filtering.
+:::
+
+```{r}
+canterbury_sf <- data.table::as.data.table(spData::nz) %>% 
+  .[Name == "Canterbury",] %>% 
+  sf::st_as_sf(.)
+canterbury_sf
+```
+
+::: task
+Show the sf object `spData::nz_height`.
+:::
+
+```{r}
+spData::nz_height
+```
+
+::: task
+Subset the elevations of `spData::nz_height` by intersecting its POINT geometries with the MULTIPOLYGON geometries `cantebury_sf`. 
+:::
+
+```{r}
+canterbury_elevations_sf <- spData::nz_height[canterbury_sf, ]
+canterbury_elevations_sf
+```
+::: task
+The result is a sf object with 70 POINT geometries of elevations for Canterbury. Map the elevation points over geometries for Canterbury and New Zealand.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: Elevations of Canterbury,New Zealand obtained by subsetting.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::nz,
+  subtitle = "Highest Points in Canterbury, New Zealand",
+  center_titles = T,
+  show_legend = F,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = canterbury_sf,
+  sf_fill = "green",
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = canterbury_elevations_sf,
+  aes_fill = "elevation",
+  sf_stroke = 0.5,
+  sf_shape = 24,
+  sf_size = 1.0,
+  sf_color = "red",
+  adding = T
+) 
+```
+
+::: task
+Repeat the above subset of `spData::nz_height` by creating a "sparse geometry binary predicate" (sgbp) using the `sf::st_intersects()` function.
+:::
+
+Create the sgbp object between the geometries of `spData::nz_height` and `canterbury_sf`:
+```{r}
+canterbury_elevations_sgbp <- sf::st_intersects(x = spData::nz_height, y = canterbury_sf)
+canterbury_elevations_sgbp
+```
+
+Note that `canterbury_elevations_sgbp` is a list indicating the presence or absence of geometries between the two sf objects.
+
+Create a logical vector that identifies which features in `spData::nz_height` intersect with *any* objects in `canterbury_sf` using the sgbp object and base function `lengths()`. Use the logical vector to subset `spData::nz_height`:
+
+```{r}
+elevations_sgbp_lg <- base::lengths(canterbury_elevations_sgbp) > 0
+canterbury_elevations_sf <- spData::nz_height[elevations_sgbp_lg,]
+canterbury_elevations_sf
+```
+The result is the same as the first result above.
+
+::: task
+Repeat the above subset of `spData::nz_height` by using `sf::st_filter()`
+:::
+
+```{r}
+canterbury_elevations_sf <- sf::st_filter(spData::nz_height, canterbury_sf)
+canterbury_elevations_sf
+```
+Again the result is the same as the first result above.
+
+### Topological relations
+
+> Topological relations describe the spatial relationships between objects. "Binary topological relationships", to give them their full name, are logical statements (in that the answer can only be TRUE or FALSE) about the spatial relationships between two objects defined by ordered sets of points (typically forming points, lines and polygons) in two or more dimensions (Egenhofer and Herring 1990).
+
+> In sf, functions testing for different types of topological relations are called 'binary predicates',
+
+::: task
+Create an sfc object list of a single POLYGON geometry.
+:::
+Note the conversion of the matrix to a list.
+```{r}
+polygon_mat <- cbind(
+  x = c(0,0,1,1,0),
+  y = c(0,1,1,0.5,0)
+)
+
+polygon_sfc <- sf::st_sfc(sf::st_polygon(list(polygon_mat)))
+polygon_sfc
+```
+
+::: task
+Create a sf object with an sfc of 3 POINT geometries.
+:::
+
+In applying `sf::st_as_sf()` to the `points_df` data.frame, note that the `coords` argument defines the names or numbers of the numeric columns holding coordinates.
+
+```{r}
+points_df <- data.frame(
+  idx = c(1, 2, 3),
+  x = c(0.2, 0.7, 0.4),
+  y = c(0.1, 0.2, 0.8)
+)
+points_sf <- sf::st_as_sf(points_df, coords = c("x", "y"))
+points_sf
+```
+
+::: task
+Create an sfc object list of 1 LINESTRING geometry.
+:::
+
+```{r}
+line_sfc <- sf::st_sfc(sf::st_linestring(cbind(
+  x = c(0.4, 1),
+  y = c(0.2, 0.5)
+)))
+line_sfc
+```
+
+::: task
+Map the above three geometries.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: POLYGON, POINT, and LINESTRING geometries created using sf package functions.
+
+geometries_plot <-
+  RspatialPkg::get_geom_sf(
+    sf = polygon_sfc,
+    sf_linewidth = 1.0,
+    sf_color = "red",
+    sf_fill = grDevices::rgb(.88, 1.0, .30),
+    subtitle = "Overlaid geometries of polygon_sfc,points_sf,line_sfc"
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = points_sf,
+    sf_stroke = 1.5,
+    sf_size = 2.0,
+    sf_fill = "red",
+    sf_color = "blue",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = points_sf,
+    aes_text = "idx",
+    text_color = "brown",
+    text_nudge_y = -0.03,
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = line_sfc,
+    sf_linewidth = 2,
+    sf_color = "green",
+    adding = T
+  )
+geometries_plot
+```
+
+::: task
+Which of the points intersect in some way with the polygon?
+:::
+
+Call `sf::st_intersects()` function:
+
+```{r}
+sf::st_intersects(points_sf, polygon_sfc)
+```
+
+> The result should match your intuition: positive (1) results are returned for the first and third point, and a negative result (represented by an empty vector) for the second are outside the polygon's border.
+
+Call `sf::st_intersects()` function with `sparse = FALSE`:
+
+```{r}
+sf::st_intersects(points_sf, polygon_sfc, sparse = FALSE)
+```
+
+> More restrictive questions include which points lie within the polygon, and which features are on or contain a shared boundary with y?
+
+::: task
+Indicate which points lie within the polygon.
+:::
+
+```{r}
+sf::st_within(points_sf, polygon_sfc)
+```
+
+::: task
+Indicate which points have a shared boundary with the polygon.
+:::
+
+```{r}
+sf::st_touches(points_sf, polygon_sfc)
+```
+
+::: task
+Indicate which points are *not* within the polygon.
+:::
+
+```{r}
+sf::st_disjoint(points_sf, polygon_sfc, sparse = FALSE)
+```
+
+::: task
+Determine the distances the points are from the polygon's nearest vertex.
+:::
+
+```{r}
+sf::st_distance(points_sf, polygon_sfc)
+```
+
+::: task
+Indicate which points are within a distance of 0.2 of the polygon's nearest vertex.
+:::
+
+```{r}
+sf::st_is_within_distance(points_sf, polygon_sfc, dist = 0.2, sparse = FALSE)
+```
+
+### DE-9IM strings
+
+### Spatial joining
+
+> ...imagine you have ten points randomly distributed across the Earth's surface and you ask, for the points that are on land, which countries are they in?
+
+::: task
+Create points that are randomly scattered over the Earth's surface.
+:::
+
+Set the seed for reproducibility and define the world's bounds:
+
+```{r}
+set.seed(2018) 
+
+(bb <- sf::st_bbox(spData::world))
+```
+
+Define the data.frame of 10 random x/y points:
+
+```{r}
+random_pts_df <- data.frame(
+  x = runif(n = 10, min = bb[1], max = bb[3]),
+  y = runif(n = 10, min = bb[2], max = bb[4])
+)
+```
+
+Create the simple features sf object:
+
+```{r}
+random_pts_sf <- random_pts_df %>% 
+  sf::st_as_sf(coords = c("x", "y")) %>%   # set, name the coordinates
+  sf::st_set_crs("EPSG:4326") # set geographic CRS
+random_pts_sf
+```
+
+::: task
+Compute the intersection of `random_pts_sf` POINT geometries with `spData::world` MULTIPOLYGON geometries.
+:::
+
+Compute the sf that represents the intersection between `spData::world` and `random_pts_sf`:
+
+Note that `x[y, ]` is identical to `x[y,,op = sf::st_intersects]
+```{r}
+world_random_sf <- spData::world[random_pts_sf, ]
+world_random_sf
+```
+
+Map the 4 countries that intersect with the random points over the world .
+
+```{r}
+#| code-fold: true
+#| fig-cap: Intersection of POINT geometries with MULTIPOLYGON geometries.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::world,
+  subtitle = "Countries that intersect with random points",
+  center_titles = T,
+  legend_key_width = 0.6
+) +
+RspatialPkg::get_geom_sf(
+  sf = world_random_sf,
+  aes_fill = "name_long",
+  adding = T
+)
+```
+
+::: task
+Compute the joining of `spData::world` and `random_pts_sf`.
+:::
+
+Compute the sf that joins `random_pts_sf`(which has only a "geometry" column with geometries for 4 countries out of the 10) with `spData::world["name_long"]`:
+
+> By default, `st_join()` performs a left join, meaning that the result is an object containing all rows from x including rows with no match in y, but it can also do inner joins by setting the argument left = FALSE. Like spatial subsetting, the default topological operator used by `st_join()` is `st_intersects()`, which can be changed by setting the join argument (see `?st_join` for details). 
+
+```{r}
+world_pts_join_sf <- sf::st_join(random_pts_sf, spData::world["name_long"])
+world_pts_join_sf
+```
+Map the sf that contains the joined geometries:
+
+```{r}
+#| code-fold: true
+#| fig-cap: Joining two geometries with a intersection operation.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::world,
+  subtitle = "Out of 10 points, 4 are over countries",
+  legend_key_width = 0.6
+) +
+RspatialPkg::get_geom_sf(
+  sf = world_pts_join_sf,
+  aes_color = "name_long",
+  sf_shape = 4,
+  sf_size = 3,
+  sf_stroke = 2,
+  adding = T
+)
+```
+
+### Non-overlapping joins
+
+::: task
+With the two datasets `spData::cycle_hire` and `spData::cycle_hire_osm`, create a scatter plot of both together to show their relationship.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap:  Scatter plot of `spData::cycle_hire` and `spData::cycle_hire_osm`.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::cycle_hire,
+  sf_color = "blue",
+  sf_fill = "blue",
+  sf_size = 2
+) +
+RspatialPkg::get_geom_sf(
+  sf = spData::cycle_hire_osm,
+  sf_color = "red",
+  sf_fill = "red",
+  sf_size = 2,
+  adding = T
+)  
+```
+
+::: task
+Perform a `sf::st_join()` where the operator is `st_is_within_distance` to locate observations in both `spData::cycle_hire` and `spData::cycle_hire_osm` that are within 20 m of each other.
+:::
+
+Perform the join:
+
+```{r}
+join_20m_sf <- sf::st_join(
+  x = spData::cycle_hire,
+  y = spData::cycle_hire_osm,
+  join = st_is_within_distance,
+  dist = 20
+)
+
+rows_of_cycle <- nrow(spData::cycle_hire)
+rows_of_join <- nrow(join_20m_sf)
+```
+
+> Note that the number of rows in the joined result is greater than the target. This is because some cycle hire stations in `cycle_hire` have multiple matches (with same id's in `join_20m_sf`) in `cycle_hire_osm`.
+
+::: task
+Aggregate/group the values by the "id" column for the overlapping points in `join_20m_sf` and return the mean from the "capacity" column.
+:::
+
+```{r}
+cycle_hire_dt <- data.table::as.data.table(spData::cycle_hire)
+mean_capacity_sf <- data.table::as.data.table(join_20m_sf) %>% 
+  .[, lapply(.SD, mean), by = id, .SDcols =c("capacity")] %>% 
+  cycle_hire_dt[., on = c("id", "id")] %>% 
+  sf::st_as_sf(.)
+mean_capacity_sf
+```
+
+With grouping by "id" of `intersect_20m_sf` we are back to 742 observations with a "capacity" mean for each "id" group.
+
+### Spatial aggregation
+
+::: task
+Aggregate the elevations of New Zealand (`spData::nz_height` with 101 "elevation" observations) by the geometries of the 16 regions in `spData::nz` and compute each region's mean.
+:::
+
+Using sf's `aggregate()` function:
+
+```{r}
+nz_elevation_means_sf <- aggregate(x = spData::nz_height, by = spData::nz, FUN = mean)
+nz_elevation_means_sf
+```
+
+The result in `nz_elevation_means_sf` is means for 7 of the 16 regions with geometries identical to `spData::nz`.
+
+::: task
+Show that the geometries of `spData::nz` and `nz_elevation_means_sf` are identical.
+:::
+
+```{r}
+identical(sf::st_geometry(spData::nz), sf::st_geometry(nz_elevation_means_sf))
+```
+
+::: task
+As an alternative to sf's `aggregate()` function, use `sf::st_join()` to get the intersection of `spData::nz`and `spData::nz_height`, group by "Name", then compute the group means. Compare the "elevation" variables for both solutions
+:::
+
+```{r}
+nz_dt <- data.table::as.data.table(spData::nz)
+nz_elevation_means_alt_sf <- sf::st_join(x = spData::nz, y = spData::nz_height) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, lapply(.SD, mean), by = Name, .SDcols =c("elevation")] %>% 
+  nz_dt[., on = c("Name", "Name")] %>% 
+  sf::st_as_sf(.)
+
+identical(nz_elevation_means_sf$elevation, nz_elevation_means_alt_sf$elevation)
+```
+
+::: task
+From `spData::nz` and `nz_elevation_means_sf` map the regions of New Zealand and with their mean elevations color coded.
+:::
+
+Cut the "elevation" of `nz_elevation_means_sf` into equal breaks:
+
+```{r}
+breaks <- seq(2700, 3000, by=50)
+labels <- c("2,700 to 2,750", "2,750 to 2,800", "2,800 to 2,850","2,850 to 2900", "2900 to 2950",  "2,950 to 3,000")
+nz_elevations_plot_sf <- data.table::as.data.table(nz_elevation_means_sf) %>% 
+  .[, elevations_f := cut(elevation, breaks = breaks, labels = labels)] %>% 
+  sf::st_as_sf(.)
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Mean elevations across New Zealand
+
+colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd")
+palette_fun <- grDevices::colorRampPalette(colors)
+
+RspatialPkg::get_geom_sf(
+  sf = nz_elevations_plot_sf,
+  aes_fill = "elevations_f",
+  sf_size = 0.1,
+  legend_key_width = 0.7,
+  legend_key_height = 0.8
+) +
+ggplot2::discrete_scale(
+  scale_name = "heights_scale",
+  name = "Elevation",
+  palette = palette_fun,
+  aesthetics = "fill",
+  drop = F,
+  labels = labels,
+  na.value = "gray"
+)
+```
+
+### Joining incongruent layers
+
+::: task
+Show both the incongruent and congruent sf objects.
+:::
+
+`spData::incongruent` and its 9 regions:
+```{r}
+#| code-fold: true
+#| fig-cap: Incongruent sf object
+RspatialPkg::get_geom_sf(
+  sf = spData::incongruent,
+  aes_fill = "value",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+)
+```
+
+```{r}
+spData::incongruent
+```
+
+`spData::aggregating_zones` and its subset of 2 regions:
+
+```{r}
+spData::aggregating_zones
+```
+
+Map `spData::incongruent` which contains a "value" field that refers to regional incomes in million Euros:
+
+```{r}
+#| code-fold: true
+#| fig-cap: Incongruent dataset from `spData::incongruent` with 9 regions.
+
+incongruent_sf <- data.table::as.data.table(spData::incongruent) %>% 
+  .[, value_f := as.factor(1:9)] %>% 
+  sf::st_as_sf(.)
+
+RspatialPkg::get_geom_sf(
+  sf = incongruent_sf,
+  aes_fill = "value_f",
+  aes_text = "value_f",
+  sf_size = 0.1,
+  subtitle = "Total Regional Income",
+  legend_key_width = 0.6,
+  legend_key_height = 1.0,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+) 
+```
+
+Map the `spData::aggregating_zones` dataset with its similar 2 regions:
+
+```{r}
+#| code-fold: true
+#| fig-cap: Congruent map with similar 2 regions.
+
+RspatialPkg::get_geom_sf(
+  sf = spData::aggregating_zones,
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+```
+
+::: task
+Transfer the "value" of `spData::incongruent`to `spData::aggregating_zones`using *area weighted* spatial interpolation.
+:::
+
+Get only "value" to be transferred and interpolated:
+
+```{r}
+value_sf <- spData::incongruent["value"] 
+```
+
+Perform the transfer and interpolation of `value_sf` to our target `spData::aggregating_zones`:
+
+```{r}
+value_interpolated_sf <- sf::st_interpolate_aw(x = value_sf, to = spData::aggregating_zones, extensive = TRUE)
+value_interpolated_sf
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Congruent overlaid on congruent sf objects
+
+congruent_sf <- data.table::as.data.table(value_interpolated_sf) %>% 
+  .[, value_f := as.factor(1:2)] %>% 
+  sf::st_as_sf(.)
+
+RspatialPkg::get_geom_sf(
+  sf = spData::incongruent,
+  subtitle = "Total Regional Income",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+) +
+RspatialPkg::get_geom_sf(
+  sf = congruent_sf,
+  aes_fill = "value_f",
+  sf_linewidth = 1.0,
+  sf_color = "blue",
+  sf_alpha = 0.1,
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = congruent_sf,
+  aes_text = "value_f",
+  adding = T
+)
+```
+
+ Note that `st_interpolate_aw()` works equally with spatially intensive variables
+
+> ...spatially intensive variables such as average income or percentages, which do not increase as the area increases.
+
+> ...set the `extensive` parameter to FALSE and it will use an average rather than a sum function when doing the aggregation.
+:::
+
+### Distance relations
+
+::: task
+Find the distance between the highest point in New Zealand (`spData::nz_height`) and the geographic centroid of the Canterbury region.
+:::
+
+Create the sf object that orders `spData::nz_height` from high to low and then selects the first row (the highest).
+
+```{r}
+nz_highest_sf <- data.table::as.data.table(spData::nz_height) %>% 
+  .[order(-elevation)] %>% 
+  sf::st_as_sf(.) %>% 
+  .[1,]
+nz_highest_sf
+```
+
+Create the sf object of the Canterbury region:
+
+```{r}
+canterbury_sf <- data.table::as.data.table(spData::nz) %>% 
+  .[Name == "Canterbury",] %>% 
+  sf::st_as_sf(.)
+canterbury_sf
+```
+
+Create the sf object that defines the geographic centroid of the Canterbury region:
+
+```{r}
+canterbury_centroid_sf <- sf::st_centroid(canterbury_sf)
+canterbury_centroid_sf
+```
+
+Find the distance between `nz_highest_sf` and `canterbury_centroid_sf`:
+
+```{r}
+distance_highest_centroid_mt <- sf::st_distance(nz_highest_sf, canterbury_centroid_sf)
+distance_highest_centroid_mt
+```
+
+::: task
+Take the first three geometries in `spData::nz_height` and find their distances from the geometries of "Otago" and "Canterbury" defined in `spData::nz`.
+:::
+
+Create the sf from `spData::nz` where "Name" = Otago \| Canterbury:
+
+```{r}
+otago_canterbury_sf <- data.table::as.data.table(spData::nz) %>% 
+  .[grepl("Canter|Otag", Name),] %>% 
+  sf::st_as_sf(.)
+otago_canterbury_sf
+```
+
+Compute the distances:
+
+```{r}
+distances_3_2_mt <- sf::st_distance(spData::nz_height[1:3,], otago_canterbury_sf)
+distances_3_2_mt
+```
+
+The second and third points in `spData::nz_height` are in Otago and have distances of 0.00 because...
+
+> distances between points and polygons refer to the distance to *any part of the polygon*
+
+::: task
+Verify that points 2 and 3 from `spData::nz_height` are in the province of Otago.
+:::
+
+```{r}
+#| code-fold: true
+#| fig-cap: Points in Otago
+
+nz_height_factor_sf <- data.table::as.data.table(spData::nz_height[2:3,]) %>% 
+  .[, elevation_f := as.factor(elevation)] %>% 
+  sf::st_as_sf(.)
+
+RspatialPkg::get_geom_sf(
+  sf = otago_canterbury_sf[2,],
+  legend_key_width = 0.6
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_height_factor_sf,
+  aes_color = "elevation_f",
+  sf_shape = 4,
+  sf_size = 2,
+  sf_stroke = 1,
+  adding = T
+)
+```
+
+## Spatial operations on raster data
+
+### Spatial subsetting
+
+> Raster objects can also be extracted by location (coordinates) and other spatial objects
+
+::: task
+Create a `SpatRaster` object called `elev_sr` using `terra::rast()` function and map it.
+:::
+
+Create the `SpatRaster` object:
+
+```{r}
+elev_sr <- terra::rast(
+  nrows = 6, 
+  ncols = 6, 
+  resolution = 0.5, 
+  xmin = -1.5, 
+  xmax = 1.5, 
+  ymin = -1.5, 
+  ymax = 1.5, 
+  vals = 1:36
+)
+elev_sr
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Scratch `SpatRaster` object.
+
+terra::plot(elev_sr)
+```
+
+::: task
+Find the value of a cell that covers a point located at coordinates (0.1, 0.1) in `elev_sr` SpatRaster object.
+:::
+
+Get the numeric cell id using `terra::cellFromXY()` and a matrix of x/y coordinates. Then use the `[]` operator to get the value:
+
+```{r}
+elev_id <- terra::cellFromXY(elev_sr, xy = matrix(c(0.1, 0.1), ncol = 2))
+elev_value_df <- elev_sr[elev_id]
+elev_value_df
+```
+
+Extract the value using `terra::extract()`:
+
+```{r}
+elev_value_extract_df <- terra::extract(elev_sr, matrix(c(0.1, 0.1), ncol = 2))
+elev_value_extract_df
+```
+
+::: task
+Get the values of a raster object by using another raster object.
+:::
+
+Create a value clipping raster object:
+
+```{r}
+value_clip_sr <- terra::rast(
+  xmin = 0.0, 
+  xmax = 1.8, 
+  ymin = -0.45, 
+  ymax = 0.45,
+  resolution = 0.3,
+  vals = rep(1,9))
+value_clip_sr
+```
+
+Get the values of `elev_sr` using the clipping raster object `value_clip_sr` and the `[]` operator:
+
+```{r}
+elev_values_df <- elev_sr[value_clip_sr]
+elev_values_df
+```
+
+Get the values of `elev_sr` by getting the extent of `value_clip_sr` and using `terra::extract()`:
+
+```{r}
+elev_values_extract_df <- terra::extract(elev_sr, terra::ext(value_clip_sr))
+elev_values_extract_df
+```
+
+::: task
+Instead of values, get an actual SpatRaster object when sub-setting using the `[]` operator and `drop=FALSE` argument.
+:::
+
+Repeat the above sub-setting of `elev_sr` using another SpatRaster object (i.e. `value_clip_sr`), but this time instead of values--return an actual SpatRaster object.
+
+Get a sub-SpatRaster object from `elev_sr`:
+
+```{r}
+elev_sub_sr <- elev_sr[value_clip_sr, drop = FALSE]
+elev_sub_sr
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Sub `SpatRaster` object.
+
+terra::plot(elev_sub_sr)
+```
+
+::: task
+Use the `[]` operator with row and column ranges to get a subset of a SpatRaster object.
+:::
+
+Get the 3rd to 5th rows and 2nd to 4th columns of `elev_spat`:
+
+```{r}
+elev_3_2_sr <- elev_sr[3:5, 2:4, drop = FALSE]
+elev_3_2_sr
+```
+
+```{r}
+#| code-fold: true
+#| fig-cap: Sub `SpatRaster` object.
+
+terra::plot(elev_3_2_sr)
+```
+
+::: task
+Use logical (or `NA`) values to subset the SpatRaster object `elev_sr` by creating a raster mask.
+:::
+
+Create a random raster mask with logical values based on:
+
+```{r}
+mask_sr <- elev_sr
+sample_values <- sample(c(NA, TRUE), 36, replace = TRUE)
+terra::values(mask_sr) <- sample_values
+matrix(values(mask_sr),nrow = 6,byrow = T)
+```
+
+Subset `elev_sr` using the mask:
+
+```{r}
+#elev_masked_sr <- elev_sr[mask_sr, drop = FALSE]
+elev_masked_alt_sr <- terra::mask(elev_sr, mask_sr)  # An alternative
+matrix(values(elev_masked_alt_sr), nrow = 6, byrow = T)
+```
+
+::: task
+Use the `[ ]` to redefine values with a logical expression.
+:::
+
+```{r}
+elev_sr[elev_sr < 20] = NA
+matrix(terra::values(elev_sr),nrow = 6, byrow = T)
+```
+
+### Map algebra
+
+> ...we define map algebra more narrowly, as operations that modify or summarise raster cell values, with reference to surrounding cells, zones, or statistical functions that apply to every cell.
+
+> Map algebra operations tend to be fast, because raster datasets only implicitly store coordinates, hence the old adage "raster is faster but vector is corrector". The location of cells in raster datasets can be calculated by using its matrix position and the resolution and origin of the dataset (stored in the header).
+
+> Map algebra (or cartographic modeling with raster data) divides raster operations into four subclasses (Tomlin 1990), with each working on one or several grids simultaneously:
+
+> 1.  Local or per-cell operations
+
+> 2.  Focal or neighborhood operations. Most often the output cell value is the result of a 3 x 3 input cell block
+
+> 3.  Zonal operations are similar to focal operations, but the surrounding pixel grid on which new values are computed can have irregular sizes and shapes
+
+> 4.  Global or per-raster operations. That means the output cell derives its value potentially from one or several entire rasters
+
+### Local operations
+
+::: task
+Show local operation operators `+`, `^2`, `log()`, `>`.
+:::
+
+Define a scratch `SpatRaster`:
+```{r}
+elev_sr <- terra::rast(
+  nrows = 6, 
+  ncols = 6, 
+  resolution = 0.5, 
+  xmin = -1.5, 
+  xmax = 1.5, 
+  ymin = -1.5, 
+  ymax = 1.5, 
+  vals = 1:36
+)
+matrix(terra::values(elev_sr),nrow = 6, byrow = T)
+```
+Add:
+```{r}
+elev_add_sr <- elev_sr + elev_sr
+matrix(terra::values(elev_add_sr),nrow = 6, byrow = T)
+```
+Raise to power 2:
+```{r}
+elev_pow_2_sr <- elev_sr^2
+matrix(terra::values(elev_pow_2_sr),nrow = 6, byrow = T)
+```
+Take the log:
+```{r}
+elev_log_sr <- log(elev_sr)
+matrix(terra::values(elev_log_sr),nrow = 6, byrow = T)
+```
+Values greater than:
+```{r}
+# Define a random matrix from normal distribution
+random_mat <- matrix(rnorm(n = 36, mean = 10, sd = 1.2), nrow = 6, byrow = T)
+# Use the matrix to create a SpatRaster
+random_sr <- terra::rast(random_mat)
+# Use `>` to create a mask
+mask_sr <- random_sr > 10
+# Show the mask
+matrix(terra::values(mask_sr),nrow = 6, byrow = T)
+```
+Mask `random_sr` with the mask `mask_sr`:
+```{r}
+random_masked_sr <- terra::mask(random_sr, mask_sr, maskvalues = 0)
+matrix(values(random_masked_sr), nrow = 6, byrow = T)
+```
+
+::: task
+Classify `elev_sr` into intervals of low, middle, high elevations.
+:::
+
+Define a "classifier" matrix with grouping 0-12, 12-24, 24-36 with values 1,2,3:
+```{r}
+elev_class_mat <- matrix(c(0, 12, 1, 12, 24, 2, 24, 36, 3), ncol = 3, byrow = T)
+elev_class_mat
+```
+
+Classify `elev_sr`:
+```{r}
+elev_classified_sr <- terra::classify(elev_sr, rcl = elev_class_mat)
+matrix(values(elev_classified_sr), nrow = 6, byrow = T)
+```
+
+Other functions include:
+  - terra::app() applies a function to each cell
+  - terra::tapp() extension of terra::app() selects a subset of layers
+  - terra::lapp() apply a function to each cell using layers as arguments
+
+::: task
+Use `terra::lapp()` to calculate the normalized difference vegetation index(NDVI) of Zion National Park.
+:::
+
+Read in the raster file for the park:
+```{r}
+zion_raster_filepath <- file.path(here(), "data", "landsat.tif")
+zion_rast_sr <- terra::rast(zion_raster_filepath)
+zion_rast_sr
+```
+> The raster object has four satellite bands - blue, green, red, and near-infrared(NIR). Our
+next step should be to implement the NDVI formula into an R function. Vegetation absorbs light heavily in the visible light spectrum, and especially in the red channel, while reflecting NIR light, explaining the NVDI formula:
+
+```{r}
+ndvi_fun <- function(nir, red){
+  (nir - red)/(nir + red)
+}
+```
+
+Applying `terra::lapp()`:
+```{r}
+ndvi_sr <- terra::lapp(zion_rast_sr[[c(4,3)]], fun = ndvi_fun)
+ndvi_sr
+```
+
+>...need to remember that our function just needs two bands (not four from the original raster), and they need to be in the NIR, red order. That is why we subset the input raster with multi_rast[[c(4, 3)]] before doing any calculations.
+
+```{r, fig.width=6,fig.height=6}
+#| code-fold: true
+
+ndvi_df <- as.data.frame(ndvi_sr, xy = T)
+RspatialPkg::get_geom_raster(
+  df = ndvi_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "lyr1",
+  subtitle = "NDVI",
+  center_titles = T,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  legend_key_width = 0.7,
+  legend_key_height = 1.0
+) +
+ggplot2::scale_fill_gradientn(
+  colors = RColorBrewer::brewer.pal(n = 9, name = "Greens"),
+  n.breaks = 8
+) +
+ggplot2::guides(
+  fill = ggplot2::guide_colorbar(
+    ticks.colour = "black"
+  )
+)
+```
+
+
+### Focal operations
+
+> While local functions operate on one cell, though possibly from multiple layers, focal operations take into account a central (focal) cell and its neighbors. The neighborhood (also named kernel, filter or moving window) under consideration is typically of size 3-by-3 cells (that is the central cell and its eight surrounding neighbors), but can take on any other (not necessarily rectangular) shape as defined by the user. A focal operation applies an aggregation function to all cells within the specified neighborhood, uses the corresponding output as the new value for the the central cell, and moves on to the next central cell.
+
+::: task 
+Apply `terra::focal()` to 
+:::
+
+```{r}
+elev_sr <- terra::rast(
+  nrows = 6, 
+  ncols = 6, 
+  resolution = 0.5, 
+  xmin = -1.5, 
+  xmax = 1.5, 
+  ymin = -1.5, 
+  ymax = 1.5, 
+  vals = 1:36
+)
+r_focal_sr <- terra::focal(elev_sr, w = matrix(1, nrow = 3, ncol = 3), fun = min)
+matrix(values(r_focal_sr), nrow = 6, byrow=T)
+```
+
+
+### Zonal operations
+
+> Just like focal operations, zonal operations apply an aggregation function to multiple raster cells. However, a second raster, usually with categorical values, defines the zonal filters (or ‘zones’) in the case of zonal operations, as opposed to a predefined neighborhood window in the case of focal operation.
+
+Create a raster with categorical values:
+```{r}
+grain_order_v <- c("clay","silt","sand")
+grain_values_v <- sample(grain_order_v, 36, replace = TRUE)
+grain_factor <- factor(grain_values_v, levels = grain_order_v)
+
+grain_sr <- terra::rast(
+  nrow = 6,
+  ncols = 6,
+  resolution = 0.5,
+  xmin = -1.5,
+  xmax = 1.5,
+  ymin = -1.5,
+  ymax = 1.5,
+  vals = grain_factor
+)
+matrix(values(grain_sr), nrow = 6, byrow = T)
+```
+
+Show the categories of `grain_sr`:
+```{r}
+cats_lst <- terra::cats(grain_sr)
+```
+
+Show the levels of `grain_sr`:
+```{r}
+terra::levels(grain_sr)
+```
+Modify the levels of `grain_sr`:
+```{r}
+base::levels(grain_sr) <- data.frame(value = c(1,2,3), wetness = c("wet","moist","dry"))
+terra::levels(grain_sr)
+```
+```{r}
+#| code-fold: true
+#| fig-cap: Redefined catagorial raster object
+
+terra::plot(grain_sr)
+```
+
+### Global operations and distances
+
+> Global operations are a special case of zonal operations with the entire raster dataset representing a single zone. The most common global operations are descriptive statistics for the entire raster dataset such as the minimum or maximum.
+
+### Map algebra counterparts in vector processing
+
+### Merging rasters
+
+::: task
+Merger elevation data from Austria and Switzerland.
+:::
+
+Download the elevation data:
+```{r}
+
+aut_file_path <- file.path(here(), "data", "AUT_elv_msk.tif")
+che_file_path <- file.path(here(), "data", "CHE_elv_msk.tif")
+aut_sr <- terra::rast(aut_file_path)
+che_sr <- terra::rast(che_file_path)
+```
+
+```{r}
+#| code-fold: true
+terra::plot(che_sr)
+```
+```{r}
+#| code-fold: true
+terra::plot(aut_sr)
+```
+```{r}
+#| code-fold: true
+aut_che_sr <- terra::merge(aut_sr, che_sr)
+terra::plot(aut_che_sr)
+```
+
+## Conclusion
+This concludes the notes on Chapter 4 "Spatial data operations".

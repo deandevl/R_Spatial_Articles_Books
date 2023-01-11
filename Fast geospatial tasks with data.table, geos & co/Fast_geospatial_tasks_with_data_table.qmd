@@ -1,0 +1,85 @@
+---
+title: "Notes on 'Fast geospatial tasks with data.table'"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 6
+    fig-asp: 0.6
+    fig-align: "center"
+    css: ../style.css
+    minimal: true
+    link-external-newwindow: true
+    callout-appearance: simple
+    callout-icon: false
+    callout-border-left: "#22CC00"
+    abstract-title: "Abstract"
+    abstract: "This article was inspired by a blog [Fast geospatial tasks with data.table, geos & co.](https://grantmcdermott.com/fast-geospatial-datatable-geos/) by Grant R. McDermott on the geographical visualization of data with data.table.  We will stay close to the article's major sections with some modifications in the R scripts based on my preferences."
+---
+
+::: note
+-   Article setup:
+    -   Install \`quarto\` executable from \<https://quarto.org\>
+-   To compile article inside RStudio:
+    -   open file `Fast_geospatial_tasks_with_data_table.qmd`
+    -   press \`Render\` from a recent version of RStudio
+-   For a table of contents, set the yaml line `toc:` to true and re-render.
+:::
+
+# Fast geospatial tasks with data.table
+
+::: task
+Load the Required R Packages.
+:::
+
+```{r, message=FALSE, warning=FALSE}
+#| label: load-packages
+
+library(data.table, quietly = T)
+library(ggplot2, quietly = T)
+library(sf, quietly = T)
+library(here, quietly = T)
+library(magrittr, quietly = T)
+library(RspatialPkg, quietly = T)
+```
+
+::: task
+Read in the North Carolina shapefile as a simple feature and map.
+:::
+
+```{r}
+nc_shapefile <- system.file("shape/nc.shp", package = "sf")
+nc_sf <- sf::st_read(nc_shapefile) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, .(NAME, CNTY_ID, geometry)] %>% 
+  sf::st_as_sf(.)
+RspatialPkg::get_geom_sf(sf = nc_sf)
+```
+
+::: task
+Perform a grouping on `nc_sf`.
+:::
+
+```{r}
+nc_grouped_sf <- data.table::as.data.table(nc_sf) %>% 
+  .[, .(geometry = sf::st_union(geometry)), by = .(region = ifelse(CNTY_ID <= 1980, "high", "low"))] %>% 
+  sf::st_as_sf(.)
+```
+
+::: task
+Map the grouped geometries.
+:::
+```{r}
+nc_grouped_plot <- RspatialPkg::get_geom_sf(sf = nc_grouped_sf, aes_fill = "region", caption = "Grouped by data.table")
+nc_grouped_plot
+```
