@@ -1,0 +1,83 @@
+---
+title: "Notes on 'Fast geospatial tasks with data.table'"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "This article was inspired by a blog [Fast geospatial tasks with data.table, geos & co.](https://grantmcdermott.com/fast-geospatial-datatable-geos/) by Grant R. McDermott on the geographical visualization of data with data.table.  We will stay close to the article's major sections with some modifications in the R scripts based on my preferences."
+---
+
+# Fast geospatial tasks with data.table
+
+:::topic
+Load the Required R Packages.
+:::
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(ggplot2)
+library(sf)
+library(magrittr)
+library(RspatialPkg)
+```
+
+:::topic
+Read in the North Carolina shapefile as a simple feature and map.
+:::
+```{r}
+#| fig-cap: Shape file *shape/nc.shp* for North Carolina
+
+nc_shapefile <- system.file("shape/nc.shp", package = "sf")
+nc_sf <- sf::st_read(nc_shapefile) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, .(NAME, CNTY_ID, geometry)] %>% 
+  sf::st_as_sf(.)
+RspatialPkg::get_geom_sf(sf = nc_sf)
+```
+
+:::topic
+Perform a grouping on `nc_sf`.
+:::
+```{r}
+nc_grouped_sf <- data.table::as.data.table(nc_sf) %>% 
+  .[, .(geometry = sf::st_union(geometry)), by = .(region = ifelse(CNTY_ID <= 1980, "high", "low"))] %>% 
+  .[, region := as.factor(region)] %>% 
+  sf::st_as_sf(.)
+```
+
+:::topic
+Map the grouped geometries.
+:::
+```{r}
+#| fig-cap: North Carolina shape file grouped by region 
+colors <- c("red","blue")
+names(colors) <- nc_grouped_sf$region
+nc_grouped_plot <- RspatialPkg::get_geom_sf(
+  sf = nc_grouped_sf, 
+  aes_fill = "region",
+  scale_values = colors,
+  scale_labels = names(colors)
+)
+nc_grouped_plot
+```

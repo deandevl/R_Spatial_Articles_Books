@@ -1,0 +1,433 @@
+---
+title: "How to fill maps with density gradients with R"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "The following R script was inspired by an article [How to fill maps with density gradients with R](https://www.andrewheiss.com/blog/2023/07/28/gradient-map-fills-r-sf/?utm_campaign=Data_Elixir&utm_source=Data_Elixir_448) published Friday, July 28, 2023 by Andrew Heiss."
+---
+
+
+# Fixing overplotted scatterplots
+
+:::topic
+Load the Required R Packages.
+:::
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(purrr)
+library(ggplot2)
+library(here)
+library(sf)
+library(sp)
+library(stars)
+library(spatstat)
+library(usmap)
+library(gt)
+library(magrittr)
+library(RplotterPkg)
+library(RspatialPkg)
+library(RcensusPkg)
+library(rnaturalearth)
+```
+
+Define the file path to the shapefiles folder at the root of this Rstudio project for holding downloaded shapefiles:
+```{r}
+shapefile_directory <- file.path(here(), "shapefiles")
+```
+
+## Initial overplotted map
+
+>...we’ll plot all 264 campgrounds in the state of Georgia.
+>
+>The data comes from Georgia’s GIS Clearinghouse
+
+>We'll make all the shapefiles use ESRI:102118 (NAD 1927 Georgia Statewide Albers: https://epsg.io/102118)
+
+```{r}
+ga_crs <- st_crs("ESRI:102118")
+```
+
+
+:::task
+Read the raw shapefile data containing campground locations in the state of Georgia.
+:::
+
+>This shapefile uses EPSG:4326 (WGS 84), but that projection information isn't included in the shapefile for whatever reason, so we need to set it
+
+```{r}
+ga_cultural_sf_path <- file.path(here(), "data", "cultural", "cultural.shp")
+ga_campgrounds_sf <- sf::read_sf(ga_cultural_sf_path) %>% 
+  data.table::as.data.table(.) %>% 
+  .[DESCRIPTOR == "CAMP/CAMPGROUND"] %>% 
+  sf::st_as_sf(.) %>% 
+  sf::st_set_crs(sf::st_crs("EPSG:4326")) %>% 
+  sf::st_transform(ga_crs)
+head(ga_campgrounds_sf, 1)
+```
+
+
+:::task
+Grab state map data of Georgia from the US Census Bureau.
+:::
+
+```{r}
+ga_fips <- usmap::fips(state = "georgia")
+express <- expression(STATEFP == ga_fips)
+ga_state_sf <- RcensusPkg::tiger_states_sf(
+  output_dir = shapefile_directory,
+  vintage = 2022,
+  general = TRUE,
+  resol = "500k",
+  express = express,
+  sf_info = FALSE
+) %>% 
+  sf::st_transform(ga_crs)
+head(ga_state_sf, 1)
+```
+
+:::task
+Get map data for all of Georgia counties map data from the US Census Bureau.
+:::
+
+```{r}
+ga_counties_sf <- RcensusPkg::tiger_counties_sf(
+  output_dir = shapefile_directory,
+  vintage = 2022,
+  general = TRUE,
+  resol = "500k",
+  express = express,
+  sf_info = FALSE
+) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, .(GEOID, NAME, COUNTYFP, COUNTYNS, geometry)] %>% 
+  .[, NAME := toupper(NAME)] %>% 
+  data.table::setnames(., old = "NAME", new = "COUNTY") %>% 
+  sf::st_as_sf(.) %>% 
+  sf::st_transform(ga_crs)
+head(ga_counties_sf)
+```
+
+:::task
+Get North America river and lake map data from the Natural Earth project.
+:::
+```{r}
+#| warning: false
+#| message: false
+
+ne_shapes_to_get <- c(
+  "rivers_lake_centerlines", "rivers_north_america",
+  "lakes", "lakes_north_america"
+)
+
+ne_data_dir <- file.path(here(), "data", "ne_rivers_lakes")
+if(!file.exists(file.path(ne_data_dir, "ne_10m_lakes.shp"))){
+  purrr::map(ne_shapes_to_get, ~rnaturalearth::ne_download(
+    scale = 10,
+    type = .,
+    category = "physical",
+    returnclass = "sf",
+    load = FALSE,
+    destdir = ne_data_dir))
+}
+```
+
+:::task
+Intersect the national geometries with Georgia geometries
+:::
+
+```{r}
+ne_data_lst <- purrr::map(ne_shapes_to_get, ~rnaturalearth::ne_load(
+    scale = 10,
+    type = .,
+    category = "physical",
+    returnclass = "sf",
+    destdir = ne_data_dir
+  ) %>%
+    sf::st_transform(ga_crs) %>% 
+    sf::st_intersection(., ga_state_sf)
+) %>%
+  set_names(ne_shapes_to_get)
+```
+
+:::task
+Plot the campgrounds and rivers in Georgia using the downloaded geometries.
+:::
+```{r}
+ga_camp_rivers_plot <- RspatialPkg::get_geom_sf(
+  sf = ga_state_sf,
+  sf_fill = "#74b560",
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+  RspatialPkg::get_geom_sf(
+    sf = ga_campgrounds_sf,
+    sf_fill = "red",
+    sf_size = 1,
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_north_america"]],
+    sf_color = "blue",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes_north_america"]],
+    sf_fill = "blue",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes"]],
+    sf_fill = "blue",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_lake_centerlines"]],
+    sf_color = "blue",
+    sf_linewidth = 0.3,
+    adding = T
+  ) 
+ga_camp_rivers_plot
+```
+
+## Option 1: Fill each county by the number of campgrounds
+
+> One way to address this overplotting is to create bins with counts of the campgrounds in each bin. 
+
+> We’ll join the campground data to the county data with st_join() (which is the geographic equivalent of left_join()) and then use some group_by()
+
+```{r}
+ga_counties_campgrounds_sf <- ga_counties_sf %>% 
+  sf::st_join(., ga_campgrounds_sf) %>% 
+  data.table::as.data.table(.) %>% 
+  .[!is.na(DESCRIPTOR), .(COUNTY, geometry)] %>% 
+  .[, .(Total = .N,geometry), by = "COUNTY"] %>% 
+  sf::st_as_sf(.)
+head(ga_counties_campgrounds_sf, 1)
+```
+:::task
+Plot this new `ga_counties_campgrounds_sf` data and fill by Total.
+:::
+```{r}
+ga_plot <-RspatialPkg::get_geom_sf(
+    sf = ga_state_sf,
+    sf_fill = "black", 
+    hide_x_tics = T,
+    hide_y_tics = T) +
+  RspatialPkg::get_geom_sf(
+    sf = ga_counties_campgrounds_sf,
+    aes_fill = "Total",
+    sf_linewidth = 0.25,
+    own_scale = T,
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_north_america"]],
+    sf_color = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes_north_america"]],
+    sf_fill = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes"]],
+    sf_fill = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_lake_centerlines"]],
+    sf_color = "white",
+    sf_linewidth = 0.3,
+    adding = T
+  ) +
+  ggplot2::scale_fill_viridis_c(option = "magma", guide = "none", na.value = "black") 
+ga_plot
+```
+
+> This already helps. We can see a cluster of campgrounds in central Georgia around the Piedmont National Wildlife Refuge and the Oconee National Forest, and another cluster in the mountains of northeast Georgia in the Chattahoochee-Oconee National forests.
+
+## Option 2: Create a grid and fill each grid box by the number of campgrounds
+
+> We can use `st_make_grid()` to divide the state area up into a grid—here we’ll use 400 boxes
+
+```{r}
+ga_grid_sf <- ga_state_sf %>% 
+  sf::st_make_grid(n = c(20, 20)) %>% 
+  sf::st_as_sf(.) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, grid_id := 1:nrow(.)] %>% 
+  sf::st_as_sf(.)
+
+ga_grid_plot <- RspatialPkg::get_geom_sf(
+  sf = ga_state_sf,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+  RspatialPkg::get_geom_sf(
+    sf = ga_grid_sf,
+    sf_alpha = 0.3,
+    adding = T
+  )
+ga_grid_plot
+```
+
+:::task
+We can then use `st_intersection()` to cut the Georgia map into pieces that fall in each of those grid boxes.
+:::
+
+```{r}
+ga_grid_map_sf <- sf::st_intersection(ga_state_sf, ga_grid_sf) %>% 
+  sf::st_as_sf(.)
+
+ga_grid_map_plot <- RspatialPkg::get_geom_sf(
+  sf = ga_grid_map_sf,
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+ga_grid_map_plot
+```
+
+:::task
+Next we can join the campground data to these boxes just like we did with the counties.
+:::
+```{r}
+campgrounds_per_grid_box_sf <- ga_grid_map_sf %>% 
+  sf::st_join(., ga_campgrounds_sf) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, Total := .N, by = "grid_id"] %>% 
+  sf::st_as_sf(.)
+
+campgrounds_per_grid_box_plot <- RspatialPkg::get_geom_sf(
+    sf = ga_state_sf,
+    sf_color = "black",
+    sf_fill = NA,
+    sf_linewidth = 0.25,
+    hide_x_tics = T,
+    hide_y_tics = T) +
+  RspatialPkg::get_geom_sf(
+    sf = campgrounds_per_grid_box_sf,
+    aes_fill = "Total",
+    own_scale = T,
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_north_america"]],
+    sf_color = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes_north_america"]],
+    sf_fill = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes"]],
+    sf_fill = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_lake_centerlines"]],
+    sf_color = "white",
+    sf_linewidth = 0.3,
+    adding = T
+  ) +
+  ggplot2::scale_fill_viridis_c(option = "magma", guide = "none", na.value = "black")
+
+campgrounds_per_grid_box_plot
+```
+
+## Option 3: Fill with a gradient of the density of the number of campgrounds
+
+> To make the shading more accurate, we can turn to turn to calculus and imagine grid boxes that are infinitely small. We can calculate densities instead of binned or clustered subunits.
+
+:::task
+Convert our geometry column of `ga_campgrounds_sf` to a spatial point pattern object (or a ppp object) that {spatstat} can work with. 
+:::
+```{r}
+ga_campgrounds_ppp <- as.ppp(ga_campgrounds_sf$geometry, W = as.owin(ga_state_sf))
+plot(ga_campgrounds_ppp)
+```
+
+:::task
+Create a stars object of the density of campground locations
+:::
+```{r}
+density_campgrounds_stars <- stars::st_as_stars(density(ga_campgrounds_ppp, dimyx = 300))
+plot(density_campgrounds_stars)
+```
+
+:::task
+Convert this {stars} object back to {sf} so it’s normal and plottable with `geom_sf()`.
+:::
+```{r}
+ga_campgrounds_density_sf <- sf::st_as_sf(density_campgrounds_stars) %>%
+  sf::st_set_crs(ga_crs)
+
+campgrounds_density_plot <- RspatialPkg::get_geom_sf(
+    sf = ga_state_sf,
+    sf_color = "black",
+    sf_fill = NA,
+    sf_linewidth = 0.25,
+    hide_x_tics = T,
+    hide_y_tics = T) +
+  RspatialPkg::get_geom_sf(
+    sf = ga_campgrounds_density_sf,
+    aes_fill = "v",
+    own_scale = T,
+    sf_color = NA,
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_north_america"]],
+    sf_color = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes_north_america"]],
+    sf_fill = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["lakes"]],
+    sf_fill = "white",
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ne_data_lst[["rivers_lake_centerlines"]],
+    sf_color = "white",
+    sf_linewidth = 0.3,
+    adding = T
+  ) +
+  RspatialPkg::get_geom_sf(
+    sf = ga_campgrounds_sf,
+    sf_color = "grey80",
+    sf_size = 1.0,
+    adding = T
+  ) +
+  ggplot2::scale_fill_viridis_c(option = "magma", guide = "none", na.value = "black")
+campgrounds_density_plot
+```

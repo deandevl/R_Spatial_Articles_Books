@@ -1,0 +1,842 @@
+---
+title: "Geocomputation with R"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 4
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "Contained here are notes on [5 Geometry operations](https://r.geocompx.org/geometry-operations) from the book [Geocomputation with R](https://geocompr.robinlovelace.net/index.html) by Lovelace, Nowosad, Muenchow. We will stay close to the book's major sections with some modifications/additions in the R scripts based on this author's own preferences."
+---
+
+# Geometry operations
+
+:::topic
+Load the Required R Packages.
+:::
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(purrr)
+library(RColorBrewer)
+library(ggplot2)
+library(here)
+library(gt)
+library(magrittr)
+library(sf)
+library(terra)
+library(smoothr)
+library(spData)
+library(spDataLarge)
+library(RplotterPkg)
+library(RspatialPkg)
+```
+
+## Introduction
+
+> This chapter focuses on manipulating the geographic elements of geographic objects, for example by simplifying and converting vector geometries, cropping raster datasets, and converting vector objects into rasters and from rasters into vectors. After reading it — and attempting the exercises at the end — you should understand and have control over the geometry column in sf objects and the extent and geographic location of pixels represented in rasters in relation to other geographic objects.
+
+## Geometric operations on vector data
+
+> ...the functions discussed in this section work on objects of class sfc in addition to objects of class sf.
+
+### Simplification
+
+:::topic
+Simplify the LINESTRING geometries representing the river Seine and tributaries.
+:::
+
+Simplify:
+```{r}
+seine_simp_sf <- sf::st_simplify(spData::seine, dTolerance = 2000) # 2000 m
+```
+
+Map:
+```{r}
+#| fig-cap: |
+#|   Figure 5.1: Comparison of the original and simplified geometry of the seine object.
+
+seine_plot <- RspatialPkg::get_geom_sf(
+  sf = spData::seine, 
+  subtitle = "Original Geometry",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+
+seine_simp_plot <- RspatialPkg::get_geom_sf(
+  sf = seine_simp_sf, 
+  subtitle = "Simplified Geometry",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+
+layout <- list(
+  plots = list(original = seine_plot, simplified = seine_simp_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+
+multi_panel_grid(
+  layout = layout
+)
+```
+
+Memory usage:
+```{r}
+object.size(spData::seine)
+object.size(seine_simp_sf)
+```
+
+:::topic
+Simplify a sf of polygon geometries such as `spData::us_states`.
+:::
+
+> ...the first step is to project the data into some adequate projected CRS, such as US National Atlas Equal Area (epsg = 2163).
+
+```{r}
+us_states2163_sf <- sf::st_transform(spData::us_states, "EPSG:2163")
+us_states_simp1_sf <- sf::st_simplify(us_states2163_sf, dTolerance = 100000) # 100 km
+```
+
+```{r}
+#| fig-cap: |
+#|   Figure 5.2-1: Polygon simplification in action, comparing original with `sf::st_simplify()` version of the contiguous US.
+
+us_states_orig_plot <- RspatialPkg::get_geom_sf(
+  sf = us_states2163_sf, 
+  subtitle = "Original data",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+us_states_simp1_plot <- RspatialPkg::get_geom_sf(
+  sf = us_states_simp1_sf, 
+  subtitle = "st_simplify",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+layout <- list(
+  plots = list(us_states_orig_plot, us_states_simp1_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+
+multi_panel_grid(
+  layout = layout,
+  cell_width = 11,
+  cell_height = 8
+)
+```
+> A limitation with st_simplify() is that it simplifies objects on a per-geometry basis. This means the ‘topology’ is lost, resulting in overlapping and ‘holey’ areal units 
+
+Compare with smoothed version `smoothr::smooth()`:
+```{r}
+us_states_smooth_sf <- smoothr::smooth(us_states2163_sf, method = "ksmooth", smoothness = 6)
+```
+
+```{r}
+#| fig-cap: |
+#|   Figure 5.2-2: Smooth version of the contiguous US. 
+RspatialPkg::get_geom_sf(
+  sf = us_states_smooth_sf, 
+  subtitle = "smoothr::smooth(method='ksmooth')",
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+```
+
+### Centroids
+
+:::topic
+Calculate and map both the centroids and *point on surface* locations of New Zealand regions.
+:::
+
+```{r, warning=FALSE}
+nz_centroid_sf <- sf::st_centroid(spData::nz)
+nz_pos_sf <- sf::st_point_on_surface(spData::nz)
+```
+
+
+```{r}
+#| fig-cap: |
+#|   Figure 5.3: Centroids and Point On Surface for regions in New Zealand
+
+RspatialPkg::get_geom_sf(
+  sf = spData::nz,
+  sf_fill = "white",
+  show_legend = F,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_centroid_sf,
+  sf_color = "black",
+  sf_size = 3,
+  sf_fill = "white",
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_pos_sf,
+  sf_color = "red",
+  sf_size = 3,
+  sf_fill = "white",
+  adding = T
+)  
+```
+
+> Notice that these red points always lie on their parent object
+
+### Buffers
+
+> Buffers are polygons representing the area within a given distance of a geometric feature: regardless of whether the input is a point, line or polygon, the output is a polygon.
+
+> How many points are within a given distance of this line?
+
+:::topic
+Plot the 5km buffer around the Seine River.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.4: Buffers around the Seine River of 5 km.
+
+seine_buff_5km_sf <- sf::st_buffer(
+  x = spData::seine,
+  dist = 5000
+) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, name := as.factor(name)] %>% 
+  sf::st_as_sf(.)
+
+RspatialPkg::get_geom_sf(
+  sf = seine_buff_5km_sf,
+  aes_fill = "name",
+  scale_values = c("red","blue","green"),
+  show_legend = F,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+  RspatialPkg::get_geom_sf(
+  sf = spData::seine,
+  sf_color = "white",
+  sf_linewidth = 0.5,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  adding = T
+)
+```
+
+### Affine transformations
+
+> Affine transfromation is any transformation that preserves lines and parallelism. However, angles or length are not necessarily preserved. Affine transformations include, among others, shifting(translation), scaling, and rotation. Additionally , it is possible to use any combination of these.
+
+> The **sf** package implements affine transformation for objects of classes sfg and sfc.
+
+:::topic
+Shift the New Zealand map 100,000 meters to the north
+:::
+
+Get the geometry for New Zealand and add 100000 meters to y-coordinates.
+```{r}
+#| fig-cap: |
+#|   Figure 5.5.1: Shift New Zealand 100,000 meters north(y coordinate)
+
+nz_sfc <- sf::st_geometry(spData::nz)
+nz_shift_sfc <- nz_sfc + c(0, 100000)
+sf::st_crs(nz_shift_sfc) = 2193
+
+RspatialPkg::get_geom_sf(
+  sf = spData::nz,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_shift_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "red",
+  adding = T
+)
+```
+
+:::topic
+Scale New Zealand to 0.5 around each features centroids.
+:::
+
+Calculate the feature centroids:
+```{r}
+nz_centroid_sfc <- sf::st_centroid(nz_sfc)
+```
+
+Shift the geometries, shrink by 0.5, and plot:
+```{r}
+#| fig-cap: |
+#|   Figure 5.5.2: Scale New Zealand by 0.5.
+
+nz_scale_sfc <- (nz_sfc - nz_centroid_sfc) * 0.5 + nz_centroid_sfc
+sf::st_crs(nz_scale_sfc) = 2193
+
+RspatialPkg::get_geom_sf(
+  sf = spData::nz,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_scale_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "red",
+  adding = T
+)
+```
+
+:::topic
+Rotate New Zealand by 30 degrees.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.5.3: Rotate New Zealand by 30 degrees.
+
+rotation_fun <- function(a){
+  rad <- a * pi / 180 # degrees to radians
+  matrix(c(cos(rad), sin(rad), -sin(rad), cos(rad)), nrow = 2, ncol = 2)
+}
+
+nz_rotate_sfc <- (nz_sfc - nz_centroid_sfc) * rotation_fun(30) + nz_centroid_sfc
+sf::st_crs(nz_rotate_sfc) = 2193
+
+RspatialPkg::get_geom_sf(
+  sf = spData::nz,
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = nz_rotate_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "red",
+  adding = T
+)
+```
+
+### Clipping
+
+> Spatial clipping is a form of spatial subsetting that involves changes to the geometry columns of at least some of the affected features.
+
+> Clipping can only apply to features more complex than points: lines, polygons, and their 'multi' equivalents.
+
+Create two overlapping circles.
+```{r}
+#| fig-cap: |
+#|   Figure 5.6: Overlapping Circles.
+
+# create two points
+points_sfc <- sf::st_sfc(st_point(c(0,1)), st_point(c(1,1)))
+# convert points to circles
+circles_sfc <- sf::st_buffer(points_sfc, dist = 1)
+sf::st_crs(circles_sfc) <- 4326
+circle_x_sfc <- sf::st_sfc(circles_sfc[[1]], crs = 4326)
+circle_y_sfc <- sf::st_sfc(circles_sfc[[2]], crs = 4326)
+
+inter_x_y_sfg <- sf::st_intersection(circles_sfc[[1]], circles_sfc[[2]])
+inter_x_y_sfc <- sf::st_sfc(inter_x_y_sfg, crs = 4326)
+
+RspatialPkg::get_geom_sf(
+  sf = circle_x_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "white"
+) +
+ RspatialPkg::get_geom_sf(
+  sf = circle_y_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "white",
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = inter_x_y_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "white",
+  adding = T
+) +
+geom_text(aes(x = c(-0.5, 1.5), y = 1), label = c("X", "Y"))
+```
+
+:::topic
+Shade the intersection of the circles.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.7: Overlapping circles with their intersection shaded in red.
+
+RspatialPkg::get_geom_sf(
+  sf = circles_sfc,
+  sf_fill = "white",
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = inter_x_y_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "red",
+  adding = T
+)+ geom_text(aes(x = c(-0.5, 1.5), y = 1), label = c("X", "Y"))
+```
+
+### Subsetting and clipping
+
+> Clipping objects can change their geometry but it can also subset objects, returning only features that intersect (or partly intersect) with a clipping/subsetting object.
+
+:::topic
+Clip points in the overlapping circles that are within the intersection area.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.9: Randomly distributed points within the bounding box enclosing circles x and y. The points that intersects with both objects x and y is highlighted.
+
+box_bbox <- sf::st_bbox(sf::st_union(circle_x_sfc[[1]], circle_y_sfc[[1]]))
+box_sfc <- sf::st_as_sfc(box_bbox)
+sf::st_crs(box_sfc) <- 4326
+set.seed(2017)
+
+points_sample_sfc <- sf::st_sample(x = box_sfc, size = 10)
+# intersection way 1
+#point_inter_sfc <- points_sample_sfc[inter_x_y_sfg]
+
+# intersection way 2
+point_inter_sfc <- sf::st_intersection(points_sample_sfc, inter_x_y_sfc)
+
+RspatialPkg::get_geom_sf(
+  sf = box_sfc,
+  sf_fill = "white",
+  hide_x_tics = T,
+  hide_y_tics = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = circle_x_sfc,
+  sf_fill = "white",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  adding = T
+)+
+RspatialPkg::get_geom_sf(
+  sf = circle_y_sfc,
+  sf_fill = "white",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = inter_x_y_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "white",
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = point_inter_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_color = "red",
+  sf_size = 3,
+  sf_fill = "white",
+  adding = T
+) +
+RspatialPkg::get_geom_sf(
+  sf = points_sample_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_color = "black",
+  sf_size = 1,
+  sf_fill = "white",
+  adding = T
+) +
+geom_text(aes(x = c(-0.5, 1.5), y = 1), label = c("X", "Y"))
+```
+
+### Geometry unions
+
+:::topic
+Aggregate *spData::us_states* into four regions with their to total populations using base functions.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.10.1: Spatial aggregation of US region populations using base aggregation.
+
+base_regions_sf <- aggregate(
+  x = spData::us_states[, "total_pop_15"],
+  by = list(spData::us_states$REGION),
+  FUN = sum,
+  na.rm = TRUE
+) %>% 
+  data.table::as.data.table(.) %>% 
+  .[, total_pop_15 := total_pop_15/10000] %>% 
+  data.table::setnames(old = "Group.1", new = "region") %>% 
+  sf::st_as_sf(.)
+
+RspatialPkg::get_geom_sf(
+  sf = base_regions_sf,
+  aes_fill = "total_pop_15",
+  aes_text = "region",
+  text_fontface = "bold",
+  scale_breaks = seq(2000,14000,2000),
+  scale_labels = seq(2000,14000,2000),
+  scale_colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd"),
+  scale_limits = c(2000,14000),
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+```
+
+:::topic
+Aggregate *spData::us_states* into four regions with their to total populations using **data.table** functions.
+:::
+
+```{r}
+#| fig-cap: |
+#|   Figure 5.10.2: Spatial aggregation of US region populations using data.table functions.
+
+regions_sf <- data.table::as.data.table(spData::us_states) %>% 
+  .[, .(geometry = sf::st_union(geometry), Pop = sum(total_pop_15, na.rm = T)), by = REGION] %>% 
+  .[, Pop := Pop/10000] %>% 
+  sf::st_as_sf(.)
+
+RspatialPkg::get_geom_sf(
+  sf = regions_sf,
+  aes_fill = "Pop",
+  scale_breaks = seq(2000,14000,2000),
+  scale_labels = seq(2000,14000,2000),
+  scale_colors = RColorBrewer::brewer.pal(n = 9, name = "YlOrRd"),
+  scale_limits = c(2000,14000),
+  hide_x_tics = T,
+  hide_y_tics = T
+) 
+```
+
+:::topic
+Unite the geometries of Texas with the "West" region which does not include Texas.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.10.3: Geometries of Texas with the "West" region
+
+us_west_sf <- spData::us_states[spData::us_states$REGION == "West",]
+us_west_union_sf <- sf::st_union(us_west_sf)
+texas_sf <- spData::us_states[spData::us_states$NAME == "Texas",]
+
+texas_west_union_sf <- sf::st_union(us_west_union_sf, texas_sf)
+
+RspatialPkg::get_geom_sf(
+  sf = texas_west_union_sf,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_fill = "white"
+)
+```
+
+### Type transformations
+
+:::topic
+Create a simple feature multipoint(sfg) and transform it into a "LINESTRING" and "POLYGON".
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.11: Examples of a linestring and a polygon casted from a multipoint geometry.
+
+multipoint_sfg <- sf::st_multipoint(matrix(c(1,3,5,1,3,1), ncol = 2))
+
+linestring_sfg <- sf::st_cast(multipoint_sfg, "LINESTRING")
+polygon_sfg <- sf::st_cast(multipoint_sfg, "POLYGON")
+
+multipoint_sfc <- sf::st_sfc(multipoint_sfg, crs = 4326)
+linestring_sfc <- sf::st_sfc(linestring_sfg, crs = 4326)
+polygon_sfc <- sf::st_sfc(polygon_sfg, crs = 4326)
+
+multipoint_plot <- RspatialPkg::get_geom_sf(
+  sf = multipoint_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_size = 2,
+  sf_color = "red",
+  sf_fill = "blue",
+  sf_stroke = .5
+)
+linestring_plot <- RspatialPkg::get_geom_sf(
+  sf = linestring_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_size = 3,
+  sf_color = "red",
+  sf_linewidth = 2
+)
+polygon_plot <- RspatialPkg::get_geom_sf(
+  sf = polygon_sfc,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  sf_size = 3,
+  sf_color = "red",
+  sf_fill = "blue",
+  sf_linewidth = 2
+)
+layout <- list(
+  plots = list(multipoint_plot, linestring_plot, polygon_plot),
+  rows = c(1, 1, 1),
+  cols = c(1, 2, 3)
+)
+multi_panel_grid(
+  layout = layout
+)
+```
+
+:::topic
+Cast a MULTILINESTRING to a LINESTRING.
+:::
+Create a MULTILINESTRING.
+```{r}
+multilinestring_lst <- sf::st_multilinestring(
+  x = list(
+    matrix(c(1,4,5,3), ncol = 2),
+    matrix(c(4,4,4,1), ncol = 2),
+    matrix(c(2,4,2,2), ncol = 2)
+  )
+)
+multilinestring_sf <- sf::st_sf(geom = sf::st_sfc(multilinestring_lst))
+```
+
+Cast a MULTILINESTRING to 3 LINESTRING's and give them attributes.
+```{r}
+linestring_sf <- sf::st_cast(multilinestring_sf, "LINESTRING")
+str_length = sf::st_length(linestring_sf)
+linestring_sf <-  data.table::as.data.table(linestring_sf) %>% 
+  .[, `:=`(name = as.factor(c("Riddle Rd", "Marshall Ave", "Foulke St")), str_length = str_length)] %>% 
+sf::st_as_sf(.)
+```
+
+Show both sf objects.
+```{r}
+colors <- c("red","blue","green")
+names(colors) <- linestring_sf$name
+
+multilinestring_plot <- RspatialPkg::get_geom_sf(
+  sf = multilinestring_sf,
+  hide_x_tics = T,
+  hide_y_tics = T
+)
+linestring_plot <- RspatialPkg::get_geom_sf(
+  sf = linestring_sf,
+  aes_color = "name",
+  scale_values = colors,
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+)
+layout <- list(
+  plots = list(multilinestring_plot, linestring_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+multi_panel_grid(
+  layout = layout
+)
+```
+
+## Geometric operations on raster data
+
+> Geometric raster operations include the shift, flipping, mirroring, scaling, rotation, or warping of images.
+
+### Geometric interactions
+
+:::topic
+Clip some raster elevation data.
+:::
+
+Show the *elev.tif* SpatRaster,
+```{r}
+elev_raster <- terra::rast(system.file("raster/elev.tif", package = "spData"))
+elev_df <- as.data.frame(elev_raster, xy = T)
+RspatialPkg::get_geom_raster(
+  df = elev_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "elev",
+  scale_breaks = seq(0,40,5),
+  scale_labels = seq(0,40,5),
+  scale_limits = c(0,40),
+  scale_colors = rev(heat.colors(8))
+)
+```
+
+Show the clip SpatRaster.
+```{r}
+clip_raster <- terra::rast(
+  xmin = 0.9, 
+  xmax = 1.8, 
+  ymin = -0.45, 
+  ymax = 0.45,
+  resolution = 0.3,
+  vals = rep(1,9)
+)
+clip_df <- as.data.frame(clip_raster, xy = T)
+names(clip_df) <- c("x","y","elev")
+RspatialPkg::get_geom_raster(
+  df = clip_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "elev",
+  scale_breaks = seq(0,40,5),
+  scale_labels = seq(0,40,5),
+  scale_limits = c(0,40),
+  scale_colors = rev(heat.colors(8))
+)
+```
+
+Show the intersection of both SpatRasters.
+```{r}
+#| warning: false
+#| message: false
+
+elev_clipped_raster <- elev_raster[clip_raster, drop = F]
+elev_clipped_df <- as.data.frame(elev_clipped_raster, xy = T)
+RspatialPkg::get_geom_raster(
+  df = elev_clipped_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "elev",
+  scale_breaks = seq(0,40,5),
+  scale_labels = seq(0,40,5),
+  scale_limits = c(0,40),
+  scale_colors = rev(heat.colors(8))
+)
+```
+
+### Extent and origin
+
+:::topic
+Align the extent of two raster objects using *terra::extend()*.
+:::
+Define a raster object.
+```{r}
+elev_1_raster <- terra::rast(system.file("raster/elev.tif", package = "spData"))
+```
+
+Create a second raster object that extends the above object by one row on the top and bottom and two columns on the left and right.
+```{r}
+elev_2_raster <- terra::extend(elev_1_raster, c(1,2))
+```
+
+Align the two objects using *terra::extend()*.
+```{r}
+elev_3_raster <- terra::extend(elev_1_raster, elev_2_raster)
+```
+
+### Aggregation and disaggregation
+
+> Raster datasets can also differ with regard to their resolution. To match resolutions, one can either decrease or increase the resolution of one raster.
+
+:::topic
+Increase the resolution of a raster object.
+:::
+```{r}
+#| fig-cap: |
+#|   Figure 5.15: Original raster and aggregated raster with increased resolution
+
+dem_raster <- terra::rast(system.file("raster/dem.tif", package = "spDataLarge"))
+dem_agg_raster <- terra::aggregate(dem_raster, fact = 5, fun = mean)
+
+dem_df <- as.data.frame(dem_raster, xy = T)
+dem_plot <- RspatialPkg::get_geom_raster(
+  df = dem_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "dem",
+  subtitle = "Original",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+)
+dem_agg_df <- as.data.frame(dem_agg_raster, xy = T)
+dem_agg_plot <- RspatialPkg::get_geom_raster(
+  df = dem_agg_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "dem",
+  subtitle = "Aggregated",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+)
+
+layout <- list(
+  plots = list(dem_plot, dem_agg_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+multi_panel_grid(
+  layout = layout
+)
+```
+
+### Resampling
+
+:::topic
+Use *terra::resample()* to handle two or more rasters with different resolutions and origins.
+:::
+
+Create a target raster object to use with the above *dem_raster* object.
+```{r}
+target_raster <- terra::rast(
+  xmin = 794650,
+  xmax = 798250,
+  ymin = 8931750,
+  ymax = 8935350,
+  resolution = 300,
+  crs = "EPSG:32717"
+)
+```
+Resample using the target object.
+```{r}
+dem_resamp_raster <- terra::resample(dem_raster, y = target_raster, method = "bilinear")
+
+dem_resamp_df <- as.data.frame(dem_resamp_raster, xy = T)
+dem_resamp_plot <- RspatialPkg::get_geom_raster(
+  df = dem_resamp_df,
+  aes_x = "x",
+  aes_y = "y",
+  aes_fill = "dem",
+  subtitle = "Bilinear resample",
+  hide_x_tics = T,
+  hide_y_tics = T,
+  show_legend = F
+)
+layout <- list(
+  plots = list(dem_plot, dem_resamp_plot),
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+multi_panel_grid(
+  layout = layout
+)
+```
+
+## Conclusion
+This concludes the notes on Chapter 5 "Geometry operations".

@@ -121,3 +121,8 @@ fabric.properties
 .idea/
 *.Rproj
 
+data/landsat.tif
+data/PPR_Tree_Inventory_2021.csv
+data/Philadelphia_shootings.geojson
+data/cultural
+data/ne_rivers_lakes

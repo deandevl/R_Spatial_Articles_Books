@@ -12,7 +12,6 @@ h4 {
 }
 
 .fullcontent {
-  font-weight: bolder;
   font-size: 11px;
   font-family: Verdana;
 }
@@ -41,8 +40,13 @@ caption {
 }
 
 .task {
-  font-size: 12pt;
-  font-weight: bold;
+  font-size: 10pt;
+  color: #964B00;
+}
+
+.topic {
+  font-size: 11pt;
+  font-style: italic;
   font-family: Verdana;
   color: #964B00;
 }
@@ -50,14 +54,12 @@ caption {
 .exer {
   font-size: 10pt;
   font-weight: bold;
-  font-family: Verdana;
   color: darkorange;
 }
 
 .takeaway {
   font-size: 10pt;
   font-weight: bold;
-  font-family: Verdana;
   font-style: italic;
 }
 
